@@ -1,0 +1,48 @@
+.login-page {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--header-gradient);
+    padding: 16px;
+}
+
+.login-card {
+    background: var(--color-surface);
+    border-radius: 16px;
+    padding: 32px;
+    width: 100%;
+    max-width: 440px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+
+    &__logo {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--color-primary);
+        font-weight: 600;
+    }
+
+    &__dev {
+        margin-top: 8px;
+        border-top: 1px solid var(--color-border);
+        padding-top: 16px;
+        font-size: 14px;
+
+        ul {
+            margin: 8px 0 0;
+            padding-inline-start: 18px;
+        }
+
+        li {
+            margin: 4px 0;
+        }
+    }
+
+    &__dev-title {
+        margin-top: 12px;
+        color: var(--color-text-secondary);
+    }
+}

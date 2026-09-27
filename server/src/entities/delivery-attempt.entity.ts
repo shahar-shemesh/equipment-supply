@@ -1,0 +1,46 @@
+import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
+
+import { AttemptOutcome, RecipientType } from '../../../shared/@core';
+import { DeliveryTask } from './delivery-task.entity';
+import { DeliveryAttemptItem } from './delivery-attempt-item.entity';
+
+//what the courier reported at the door for one task: who received, the signature and a result per item.
+//a task can end up with more than one attempt once "try again tomorrow" is a business rule, today the first attempt closes the task
+@Entity('delivery_attempts')
+export class DeliveryAttempt {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @ManyToOne(() => DeliveryTask, (t) => t.attempts)
+  @JoinColumn({ name: 'task_id' })
+  task: DeliveryTask;
+
+  @Column()
+  task_id: number;
+
+  @Column({ type: 'varchar' })
+  outcome: AttemptOutcome;
+
+  @Column({ type: 'varchar' })
+  recipient_type: RecipientType;
+
+  @Column({ nullable: true })
+  recipient_name: string;
+
+  @Column({ nullable: true })
+  recipient_id_number: string;
+
+  @Column({ nullable: true })
+  recipient_phone: string;
+
+  //png data url straight from the canvas. the spec asks for a restricted file storage with the issuance id + timestamp,
+  //that is a later step, for now the db holds it
+  @Column({ type: 'text', nullable: true })
+  signature_png: string;
+
+  @CreateDateColumn()
+  reported_at: Date;
+
+  @OneToMany(() => DeliveryAttemptItem, (i) => i.attempt, { cascade: true })
+  items: DeliveryAttemptItem[];
+}

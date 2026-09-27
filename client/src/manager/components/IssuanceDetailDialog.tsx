@@ -1,0 +1,195 @@
+import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { Alert, Button, CircularProgress, Dialog, DialogContent, FormControlLabel, IconButton, Switch, TextField } from "@mui/material";
+import CloseIcon from "@mui/icons-material/Close";
+import EditIcon from "@mui/icons-material/Edit";
+import PersonIcon from "@mui/icons-material/Person";
+import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
+import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
+import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import ErrorIcon from "@mui/icons-material/Error";
+
+import { IIssuance, IssuanceStatus, Priority } from "../../../../shared/@core";
+import { reasonKeys } from "../../../../shared/@utils";
+import { StatusBadge } from "../../components/StatusBadge";
+import { del, errorMessage, get, patch } from "../../utils/service";
+import { displayNumber, fullAddress } from "../../utils/format";
+
+type Props = {
+  id: number; //null closes the dialog
+  onClose: () => void;
+  onChanged: () => void;
+  onAssign: (id: number) => void;
+};
+
+//the manager's view of one issuance. the design iterations for this screen are still moving (see the designer notes in design/),
+//this follows the modal version: header fields, alert for undelivered items, date / self pickup / delete, then the items
+export function IssuanceDetailDialog({ id, onClose, onChanged, onAssign }: Props) {
+  const { t } = useTranslation();
+  const [issuance, setIssuance] = useState<IIssuance>(null);
+  const [error, setError] = useState("");
+  const [deleteStep, setDeleteStep] = useState<"none" | "reason" | "confirm" | "done">("none");
+  const [deleteReason, setDeleteReason] = useState("");
+
+  async function load() {
+    try {
+      setIssuance(await get(`/issuances/${id}`));
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+
+  useEffect(() => {
+    setIssuance(null);
+    setError("");
+    setDeleteStep("none");
+    setDeleteReason("");
+    if (id) load();
+  }, [id]);
+
+  async function update(body: any) {
+    try {
+      setIssuance(await patch(`/issuances/${id}`, body));
+      onChanged();
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+
+  async function remove() {
+    try {
+      await del(`/issuances/${id}`, { reason: deleteReason });
+      setDeleteStep("done");
+      onChanged();
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+
+  //the last attempt's undelivered lines, shown as the red alert at the top
+  const lastAttempt = issuance?.current_task?.attempts?.slice(-1)[0];
+  const failedItems = (lastAttempt?.items || []).filter((x) => !x.delivered).map((x) => ({ ...x, item: issuance.items.find((i) => i.id === x.item_id) }));
+  const closed = issuance && [IssuanceStatus.deleted, IssuanceStatus.delivered, IssuanceStatus.self_pickup].includes(issuance.status);
+
+  return (
+    <Dialog open={!!id} onClose={onClose} maxWidth="md" fullWidth className="detail-dialog">
+      <DialogContent>
+        {!issuance && !error && <div className="detail-dialog__loading"><CircularProgress /></div>}
+        {error && <Alert severity="error">{error}</Alert>}
+
+        {deleteStep === "done" && (
+          <div className="detail-dialog__done">
+            <CheckCircleIcon className="detail-dialog__done-icon" />
+            <h2>{t("delete_done")}</h2>
+            <Button variant="contained" onClick={onClose}>{t("back_to_board")}</Button>
+          </div>
+        )}
+
+        {issuance && deleteStep !== "done" && (
+          <>
+            <div className="dialog-title-row">
+              <h2>{t("detail_title", { number: displayNumber(issuance) })}</h2>
+              <IconButton onClick={onClose}><CloseIcon /></IconButton>
+            </div>
+
+            <FormControlLabel
+              control={<Switch checked={issuance.priority === Priority.urgent} disabled={closed} onChange={(e) => update({ priority: e.target.checked ? Priority.urgent : Priority.normal })} />}
+              label={t("detail_mark_urgent")}
+            />
+
+            <section className="detail-dialog__section detail-dialog__head">
+              <div className="field">
+                <label>{t("detail_customer")}</label>
+                <strong>{issuance.customer_name}</strong>
+              </div>
+              <div className="field">
+                <label>{t("detail_destination")}</label>
+                <strong>{fullAddress(issuance)}</strong>
+              </div>
+              <div className="field">
+                <label>{t("detail_city")}</label>
+                <strong>{issuance.address_city}</strong>
+              </div>
+              <div className="field">
+                <label>{t("detail_courier")}</label>
+                <strong>{issuance.current_task?.courier?.name || t("detail_no_courier")}</strong>
+                {!closed && (
+                  <button type="button" className="link-button with-icon" onClick={() => onAssign(issuance.id)}>
+                    <EditIcon fontSize="inherit" /> {t("change_courier")}
+                  </button>
+                )}
+              </div>
+              <div className="field">
+                <label>{t("detail_status")}</label>
+                <StatusBadge status={issuance.status} managerView />
+              </div>
+
+              {failedItems.length > 0 && (
+                <div className="detail-dialog__alert">
+                  {failedItems.map((f) => (
+                    <div key={f.id}>
+                      <ErrorIcon fontSize="small" /> <strong>{t("detail_item_not_delivered", { name: f.item?.product_name })}</strong>
+                      <div className="muted">"{t(reasonKeys[f.reason])}{f.reason_details ? ` - ${f.reason_details}` : ""}"</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="detail-dialog__section detail-dialog__actions">
+              <div className="field">
+                <label><CalendarMonthIcon fontSize="inherit" /> {t("detail_delivery_date")}</label>
+                <TextField type="date" value={issuance.delivery_date || ""} disabled={closed} onChange={(e) => update({ delivery_date: e.target.value })} />
+              </div>
+              {!closed && (
+                <Button variant="outlined" startIcon={<PersonIcon />} onClick={() => update({ self_pickup: true })}>
+                  {t("row_self_pickup")}
+                </Button>
+              )}
+              {issuance.status !== IssuanceStatus.deleted && deleteStep === "none" && (
+                <Button color="error" startIcon={<DeleteOutlineIcon />} onClick={() => setDeleteStep("reason")}>
+                  {t("row_delete")}
+                </Button>
+              )}
+            </section>
+
+            {deleteStep === "reason" && (
+              <section className="detail-dialog__section detail-dialog__delete">
+                <label>{t("detail_delete_reason")}</label>
+                <TextField multiline minRows={3} fullWidth placeholder={t("detail_delete_placeholder")} value={deleteReason} onChange={(e) => setDeleteReason(e.target.value)} />
+                <div className="detail-dialog__delete-actions">
+                  <Button variant="contained" color="primary" startIcon={<DeleteOutlineIcon />} onClick={() => setDeleteStep("confirm")}>{t("row_delete")}</Button>
+                  <Button variant="text" onClick={() => setDeleteStep("none")}>{t("cancel")}</Button>
+                </div>
+              </section>
+            )}
+
+            <section className="detail-dialog__section detail-dialog__items">
+              {issuance.items.map((item) => (
+                <div key={item.id} className="item-lines">
+                  <div><label>{t("item_name")}</label><strong>{item.product_name}</strong></div>
+                  <div><label>{t("item_station")}</label><strong>{item.station_number || "-"}</strong></div>
+                  <div><label>{t("item_serial")}</label><strong>{item.serial_number || "-"}</strong></div>
+                  <div><label>{t("item_catalog")}</label><strong>{item.catalog_number || "-"}</strong></div>
+                  <div><label>{t("item_quantity")}</label><strong>{item.quantity} {t("item_unit")}</strong></div>
+                </div>
+              ))}
+            </section>
+          </>
+        )}
+      </DialogContent>
+
+      {/* second confirmation, the design shows it as its own modal */}
+      <Dialog open={deleteStep === "confirm"} onClose={() => setDeleteStep("reason")} maxWidth="sm" fullWidth>
+        <DialogContent className="confirm-dialog">
+          <h2>{t("delete_confirm_title")}</h2>
+          <p>{t("delete_confirm_text")}</p>
+          <div className="confirm-dialog__actions">
+            <Button variant="contained" onClick={remove}>{t("delete_confirm_button")}</Button>
+            <Button variant="outlined" onClick={() => setDeleteStep("reason")}>{t("back")}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </Dialog>
+  );
+}

@@ -1,0 +1,358 @@
+.board {
+    display: grid;
+    grid-template-columns: 1fr 440px;
+    gap: 32px;
+    align-items: start;
+
+    @media (max-width: 1280px) {
+        grid-template-columns: 1fr;
+    }
+
+    &__main {
+        min-width: 0;
+    }
+
+    &__title-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 24px;
+    }
+
+    &__updated {
+        color: var(--color-text-secondary);
+        margin-top: 4px;
+    }
+
+    &__range {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--color-text-secondary);
+        margin: 16px 0 8px;
+    }
+
+    &__page-btn {
+        background: none;
+        border: none;
+        color: var(--color-primary);
+        font-size: 20px;
+        cursor: pointer;
+        padding: 0 6px;
+
+        &:disabled {
+            color: var(--color-border);
+            cursor: default;
+        }
+    }
+
+    // the sticky action bar of the design: "3 הנפקות נבחרו", שיוך שליח, סימון כדחוף, ביטול בחירה
+    &__bottom-bar {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: var(--color-surface);
+        border-top: 1px solid var(--color-border);
+        padding: 16px 32px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        box-shadow: 0 -4px 16px rgba(26, 43, 61, 0.08);
+        z-index: 5;
+    }
+}
+
+.board-filters {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+
+    &__search .MuiOutlinedInput-root {
+        border-radius: 999px;
+        background: var(--color-surface);
+    }
+
+    &__row {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+
+        .MuiTextField-root {
+            min-width: 170px;
+            background: var(--color-surface);
+        }
+    }
+}
+
+.issuances-table {
+    background: var(--color-surface);
+    border-radius: 12px;
+    border: 1px solid var(--color-border);
+    overflow: auto;
+
+    &--loading {
+        opacity: 0.6;
+    }
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    th,
+    td {
+        text-align: right;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--color-surface-2);
+        white-space: nowrap;
+    }
+
+    th {
+        color: var(--color-text-secondary);
+        font-weight: 500;
+        background: var(--color-surface-2);
+    }
+
+    tr.is-selected td {
+        background: var(--color-primary-lighter);
+    }
+
+    .col-check,
+    .col-menu {
+        width: 48px;
+        padding: 4px 8px;
+    }
+
+    &__number {
+        font-weight: 500;
+        text-decoration: none;
+    }
+
+    &__empty {
+        text-align: center !important;
+        color: var(--color-text-secondary);
+        padding: 40px !important;
+    }
+}
+
+.menu-item--danger {
+    color: var(--color-danger) !important;
+}
+
+// side widgets
+.side-widgets {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    position: sticky;
+    top: 24px;
+}
+
+.widget {
+    background: var(--color-surface);
+    border-radius: 12px;
+    border: 1px solid var(--color-border);
+    overflow: hidden;
+
+    &__header {
+        background: var(--color-primary);
+        color: white;
+        font-weight: 600;
+        padding: 12px 16px;
+    }
+
+    &__body {
+        padding: 12px 16px;
+
+        .MuiOutlinedInput-root {
+            border-radius: 999px;
+        }
+    }
+
+    &__list {
+        list-style: none;
+        margin: 8px 0 0;
+        padding: 0;
+        max-height: 300px;
+        overflow: auto;
+
+        li {
+            position: relative;
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 4px 12px;
+            border-bottom: 1px solid var(--color-surface-2);
+        }
+    }
+
+    &__count {
+        color: var(--color-text-secondary);
+        font-weight: 500;
+    }
+
+    &__bar {
+        position: absolute;
+        bottom: 4px;
+        right: 4px;
+        height: 4px;
+        border-radius: 2px;
+        background: var(--color-primary);
+        opacity: 0.6;
+    }
+}
+
+// assign dialog
+.assign-dialog {
+    &__list {
+        list-style: none;
+        margin: 16px 0;
+        padding: 0;
+        border: 1px solid var(--color-border);
+        border-radius: 8px;
+        max-height: 360px;
+        overflow: auto;
+
+        li {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--color-surface-2);
+            cursor: pointer;
+
+            &:hover {
+                background: var(--color-primary-lighter);
+            }
+
+            &.is-selected {
+                background: #D3DEF3;
+                color: var(--color-primary-dark);
+                font-weight: 600;
+            }
+        }
+    }
+}
+
+// issuance detail dialog
+.detail-dialog {
+    &__loading {
+        display: flex;
+        justify-content: center;
+        padding: 60px;
+    }
+
+    &__section {
+        background: var(--color-bg);
+        border-radius: 12px;
+        padding: 16px 20px;
+        margin-top: 16px;
+    }
+
+    &__head {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+
+        .field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+
+            label {
+                color: var(--color-text-secondary);
+                font-size: 14px;
+            }
+        }
+    }
+
+    &__alert {
+        grid-column: 1 / -1;
+        background: var(--color-danger-bg);
+        border: 1px solid var(--color-danger);
+        border-radius: 8px;
+        padding: 12px 16px;
+        color: var(--color-danger);
+
+        svg {
+            vertical-align: middle;
+        }
+    }
+
+    &__actions {
+        display: flex;
+        align-items: flex-end;
+        gap: 24px;
+        flex-wrap: wrap;
+
+        .field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+
+            label {
+                font-weight: 600;
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+            }
+        }
+
+        .MuiTextField-root {
+            background: var(--color-surface);
+        }
+    }
+
+    &__delete {
+        label {
+            font-weight: 600;
+            display: block;
+            margin-bottom: 8px;
+        }
+
+        .MuiTextField-root {
+            background: var(--color-surface);
+        }
+    }
+
+    &__delete-actions {
+        display: flex;
+        justify-content: flex-start;
+        gap: 12px;
+        margin-top: 12px;
+    }
+
+    &__items .item-lines {
+        display: grid;
+        grid-template-columns: 1fr;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--color-border);
+
+        > div {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+
+            label {
+                color: var(--color-text-secondary);
+            }
+        }
+
+        &:last-child {
+            border-bottom: none;
+        }
+    }
+
+    &__done {
+        text-align: center;
+        padding: 40px 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+    }
+
+    &__done-icon {
+        font-size: 72px !important;
+        color: var(--color-success);
+    }
+}

@@ -1,0 +1,159 @@
+// colors from the screens in design/ (not from the style-guide page, see RtlTheme.tsx)
+:root {
+    --color-primary: #0A52BD;
+    --color-primary-dark: #084297;
+    --color-primary-light: #E7EEF8;
+    --color-primary-lighter: #F0F5FC;
+    --color-accent: #00C2E0;
+    --color-text: #1A2B3D;
+    --color-text-secondary: #5C6B7A;
+    --color-bg: #F5F7FA;
+    --color-surface: #FFFFFF;
+    --color-surface-2: #EDF1F5;
+    --color-border: #D5DCE5;
+    --color-success: #2ECC71;
+    --color-success-bg: #E3F9EC;
+    --color-danger: #D32F2F;
+    --color-danger-bg: #FDECEC;
+    --color-warning: #F5A623;
+    --color-warning-bg: #FFF3DC;
+    // right side dark blue, left side cyan, like the header in every screen
+    --header-gradient: linear-gradient(90deg, #00C2E0 0%, #0A52BD 55%);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+    min-height: 100%;
+}
+
+body {
+    margin: 0;
+    font-family: Rubik, Arial, sans-serif;
+    background: var(--color-bg);
+    color: var(--color-text);
+    direction: rtl;
+}
+
+h1 {
+    font-size: 28px;
+    font-weight: 700;
+    margin: 0;
+}
+
+h2 {
+    font-size: 20px;
+    font-weight: 600;
+    margin: 0;
+}
+
+h3 {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 0;
+}
+
+a {
+    color: var(--color-primary);
+}
+
+.muted {
+    color: var(--color-text-secondary);
+}
+
+.small {
+    font-size: 12px;
+}
+
+.req {
+    color: var(--color-danger);
+    margin-inline-start: 2px;
+}
+
+.link-button {
+    background: none;
+    border: none;
+    color: var(--color-primary);
+    cursor: pointer;
+    font: inherit;
+    padding: 0;
+    text-decoration: underline;
+
+    &.with-icon {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        text-decoration: none;
+    }
+}
+
+.field-error {
+    color: var(--color-danger);
+    font-size: 12px;
+    margin-top: 4px;
+}
+
+.page-loading {
+    display: flex;
+    justify-content: center;
+    padding: 60px;
+}
+
+// shared dialog bits
+.dialog-title-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 16px;
+}
+
+.confirm-dialog {
+    text-align: center;
+    padding: 40px 24px !important;
+
+    p {
+        color: var(--color-text-secondary);
+    }
+
+    &__actions {
+        display: flex;
+        justify-content: center;
+        gap: 12px;
+        margin-top: 24px;
+    }
+}
+
+.success-dialog {
+    text-align: center;
+    padding: 40px 24px !important;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+
+    &__icon {
+        font-size: 72px !important;
+        color: var(--color-success);
+    }
+}
+
+// a value under a label, used all over the detail screens
+.kv {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 6px 0;
+
+    label {
+        color: var(--color-text-secondary);
+    }
+
+    span {
+        font-weight: 500;
+        text-align: left;
+    }
+}

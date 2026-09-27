@@ -1,0 +1,53 @@
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-size: 14px;
+    white-space: nowrap;
+    background: var(--color-surface-2);
+    color: var(--color-text-secondary);
+
+    svg {
+        font-size: 16px;
+    }
+
+    &--assigned {
+        background: var(--color-primary-light);
+        color: var(--color-primary);
+    }
+
+    &--delivered {
+        background: var(--color-success-bg);
+        color: #1B7F45;
+    }
+
+    &--partially_delivered {
+        background: var(--color-warning-bg);
+        color: #9A6300;
+    }
+
+    &--not_delivered {
+        background: var(--color-danger-bg);
+        color: var(--color-danger);
+    }
+
+    &--self_pickup {
+        background: var(--color-primary-light);
+        color: var(--color-primary-dark);
+    }
+
+    &--deleted {
+        text-decoration: line-through;
+    }
+}
+
+.priority-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 13px;
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+}

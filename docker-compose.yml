@@ -1,0 +1,17 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: equipment-supply-db
+    environment:
+      POSTGRES_DB: equipment_supply
+      POSTGRES_USER: equipment
+      POSTGRES_PASSWORD: equipment
+    ports:
+      # 5432 on this machine is already taken by another postgres, so the host side is 5433.
+      # server/.env has DB_PORT=5433 to match
+      - "5433:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+volumes:
+  db-data:
