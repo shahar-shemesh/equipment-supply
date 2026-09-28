@@ -1,14 +1,17 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Checkbox, IconButton, ListItemIcon, Menu, MenuItem } from "@mui/material";
+import { Checkbox, IconButton, ListItemIcon, Menu, MenuItem, TextField } from "@mui/material";
 import MoreVertIcon from "@mui/icons-material/MoreVert";
 import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import PersonIcon from "@mui/icons-material/Person";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
 import LocalShippingIcon from "@mui/icons-material/LocalShipping";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
+import UnfoldMoreIcon from "@mui/icons-material/UnfoldMore";
+import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
+import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
 
-import { IIssuance, IssuanceStatus } from "../../../../shared/@core";
+import { IIssuance, ISortState, IssuanceSortKey, IssuanceStatus, issuanceSortKeys } from "../../../../shared/@core";
 import { PriorityBadge, StatusBadge } from "../../components/StatusBadge";
 import { displayNumber, fullAddress } from "../../utils/format";
 import { useBreakpoint } from "../../utils/useBreakpoint";
@@ -21,14 +24,28 @@ type Props = {
   loading: boolean;
   selected: number[];
   onSelect: (ids: number[]) => void;
+  sort: ISortState; //null = the server default
+  onSort: (next: ISortState) => void;
   onOpen: (row: IIssuance) => void;
   onAction: (action: RowAction, row: IIssuance) => void;
 };
 
+//the header text of every sortable column, by the key the server understands
+const columnKeys: Record<IssuanceSortKey, string> = {
+  number: "col_number",
+  customer: "col_customer",
+  destination: "col_destination",
+  city: "col_city",
+  courier: "col_courier",
+  priority: "col_priority",
+  status: "col_status",
+};
+
 //plain table on purpose, the design is a simple grid and a data-grid lib would fight the rtl styling.
 //under 900px (phone and portrait tablet, where nine columns cannot fit) the same rows render as cards (IssuanceCard),
-//the selection and the kebab menu are shared
-export function IssuancesTable({ rows, loading, selected, onSelect, onOpen, onAction }: Props) {
+//the selection and the kebab menu are shared. sorting happens on the server (the pages are 15 of 30), here it is only
+//the arrows in the header and a select on the cards
+export function IssuancesTable({ rows, loading, selected, onSelect, sort, onSort, onOpen, onAction }: Props) {
   const { t } = useTranslation();
   const { compact } = useBreakpoint();
   const [menu, setMenu] = useState<{ anchor: HTMLElement; row: IIssuance }>(null);
@@ -56,6 +73,32 @@ export function IssuancesTable({ rows, loading, selected, onSelect, onOpen, onAc
     onAction(action, row);
   }
 
+  //a header click walks asc -> desc -> back to the default order
+  function cycleSort(key: IssuanceSortKey) {
+    if (sort?.key !== key) onSort({ key, dir: "asc" });
+    else if (sort.dir === "asc") onSort({ key, dir: "desc" });
+    else onSort(null);
+  }
+
+  function flipDir() {
+    onSort({ key: sort.key, dir: sort.dir === "asc" ? "desc" : "asc" });
+  }
+
+  //the faint up/down glyph of the design on every column, a solid arrow on the sorted one
+  function sortableHeader(key: IssuanceSortKey) {
+    const active = sort?.key === key;
+    return (
+      <th className={`sortable ${active ? "is-sorted" : ""}`} onClick={() => cycleSort(key)} aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
+        <span>
+          {t(columnKeys[key])}
+          {!active && <UnfoldMoreIcon fontSize="inherit" className="sort-hint" />}
+          {active && sort.dir === "asc" && <ArrowUpwardIcon fontSize="inherit" />}
+          {active && sort.dir === "desc" && <ArrowDownwardIcon fontSize="inherit" />}
+        </span>
+      </th>
+    );
+  }
+
   //one menu for the table rows and the cards, anchored to whichever kebab was tapped
   const actionsMenu = (
     <Menu open={!!menu} anchorEl={menu?.anchor} onClose={() => setMenu(null)}>
@@ -70,10 +113,25 @@ export function IssuancesTable({ rows, loading, selected, onSelect, onOpen, onAc
   if (compact) {
     return (
       <div className={`issuance-cards ${loading ? "issuance-cards--loading" : ""}`}>
-        <label className="issuance-cards__select-all">
-          <Checkbox size="small" checked={allChecked} onChange={toggleAll} />
-          {t("select_all")}
-        </label>
+        <div className="issuance-cards__toolbar">
+          <label className="issuance-cards__select-all">
+            <Checkbox size="small" checked={allChecked} onChange={toggleAll} />
+            {t("select_all")}
+          </label>
+
+          {/* no headers to click on a phone, the same columns in a select plus one button for the direction */}
+          <div className="issuance-cards__sort">
+            <TextField select label={t("sort_by")} value={sort?.key || ""} onChange={(e) => onSort(e.target.value ? { key: e.target.value as IssuanceSortKey, dir: sort?.dir || "asc" } : null)}>
+              <MenuItem value="">{t("sort_default")}</MenuItem>
+              {issuanceSortKeys.map((k) => (
+                <MenuItem key={k} value={k}>{t(columnKeys[k])}</MenuItem>
+              ))}
+            </TextField>
+            <IconButton aria-label={t("sort_toggle_dir")} disabled={!sort} onClick={flipDir}>
+              {sort?.dir === "desc" ? <ArrowDownwardIcon /> : <ArrowUpwardIcon />}
+            </IconButton>
+          </div>
+        </div>
 
         {rows.length === 0 && !loading && <div className="issuance-cards__empty">{t("board_empty")}</div>}
         {rows.map((row) => (
@@ -99,13 +157,13 @@ export function IssuancesTable({ rows, loading, selected, onSelect, onOpen, onAc
         <thead>
           <tr>
             <th className="col-check"><Checkbox size="small" checked={allChecked} onChange={toggleAll} /></th>
-            <th>{t("col_number")}</th>
-            <th>{t("col_customer")}</th>
-            <th>{t("col_destination")}</th>
-            <th>{t("col_city")}</th>
-            <th>{t("col_courier")}</th>
-            <th>{t("col_priority")}</th>
-            <th>{t("col_status")}</th>
+            {sortableHeader("number")}
+            {sortableHeader("customer")}
+            {sortableHeader("destination")}
+            {sortableHeader("city")}
+            {sortableHeader("courier")}
+            {sortableHeader("priority")}
+            {sortableHeader("status")}
             <th className="col-menu"></th>
           </tr>
         </thead>

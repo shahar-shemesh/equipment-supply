@@ -151,3 +151,15 @@ export interface IAttemptPayload {
   signature_png: string;
   items: IDeliveryAttemptItem[];
 }
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+// the board columns the manager can sort by. the server maps each key to sql (issuances.service.ts), the client draws
+// the arrows in the table header and offers the same list on the phone
+export type IssuanceSortKey = "number" | "customer" | "destination" | "city" | "courier" | "priority" | "status";
+export const issuanceSortKeys: IssuanceSortKey[] = ["number", "customer", "destination", "city", "courier", "priority", "status"];
+
+export interface ISortState {
+  key: IssuanceSortKey;
+  dir: "asc" | "desc";
+}

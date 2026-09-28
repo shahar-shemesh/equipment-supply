@@ -1,10 +1,29 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 
-import { IssuanceStatus, Priority, TaskStatus } from '../../../shared/@core';
+import { IssuanceSortKey, IssuanceStatus, Priority, TaskStatus } from '../../../shared/@core';
 import { Issuance, DeliveryTask, Courier } from '../entities';
 import { assertCanDo, editableStatuses } from './issuance.rules';
+
+//the courier on the open task, or on the last closed one, the same pick as withCurrentTask below. a correlated subselect
+//instead of a join: an issuance has several tasks over time and a join would multiply the rows under offset / limit
+const COURIER_NAME_SQL = `(SELECT c.name FROM delivery_tasks t JOIN couriers c ON c.id = t.courier_id WHERE t.issuance_id = i.id AND t.status != '${TaskStatus.cancelled}' ORDER BY (t.status = '${TaskStatus.pending}') DESC, t.id DESC LIMIT 1)`;
+
+//the enums sort in the order the manager thinks in (open work first), not in the alphabet of their values
+const STATUS_RANK_SQL = `CASE i.status WHEN '${IssuanceStatus.unassigned}' THEN 0 WHEN '${IssuanceStatus.assigned}' THEN 1 WHEN '${IssuanceStatus.partially_delivered}' THEN 2 WHEN '${IssuanceStatus.not_delivered}' THEN 3 WHEN '${IssuanceStatus.delivered}' THEN 4 WHEN '${IssuanceStatus.self_pickup}' THEN 5 ELSE 6 END`;
+const PRIORITY_RANK_SQL = `CASE i.priority WHEN '${Priority.urgent}' THEN 0 ELSE 1 END`;
+
+//what ?sort= may name, and the sql each one orders by (columns, or the aliases selected in list())
+const SORT_COLUMNS: Record<IssuanceSortKey, string> = {
+  number: 'i.sap_number',
+  customer: 'i.customer_name',
+  destination: 'i.address_street',
+  city: 'i.address_city',
+  courier: 'courier_name',
+  priority: 'priority_rank',
+  status: 'status_rank',
+};
 
 //the open task, or the last closed one when there is no open task. the board shows its courier.
 //items are sorted here and not in the query: an ORDER BY on a joined column breaks typeorm's skip/take (it paginates distinct rows, not distinct issuances)
@@ -44,16 +63,23 @@ export class IssuancesService {
     @InjectRepository(Courier) private couriers: Repository<Courier>,
   ) {}
 
-  // /api/issuances?status=&priority=&city=&customer=&courier_id=&date=&search=&page=&page_size=
+  // /api/issuances?status=&priority=&city=&customer=&courier_id=&date=&search=&sort=&order=&page=&page_size=
+  //two queries on purpose: the page of ids comes from a flat query with plain offset / limit, where any sort expression
+  //(the courier subselect, the CASE ranks) is safe. the entities with their relations are loaded for those ids after.
+  //typeorm's skip / take on a joined query paginates joined rows and breaks as soon as the order touches a joined column
   async list(q: any) {
     const page = Math.max(+q.page || 1, 1);
     const pageSize = Math.min(+q.page_size || 15, 100);
+    const sortKey = q.sort ? (String(q.sort) as IssuanceSortKey) : null;
+    if (sortKey && !SORT_COLUMNS[sortKey]) throw new BadRequestException(`unknown sort column ${sortKey}`);
+    const dir: 'ASC' | 'DESC' = String(q.order || 'asc').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
 
     const qb = this.issuances
       .createQueryBuilder('i')
-      .leftJoinAndSelect('i.items', 'item')
-      .leftJoinAndSelect('i.tasks', 'task', 'task.status != :cancelled', { cancelled: TaskStatus.cancelled })
-      .leftJoinAndSelect('task.courier', 'courier')
+      .select('i.id', 'id')
+      .addSelect(COURIER_NAME_SQL, 'courier_name')
+      .addSelect(STATUS_RANK_SQL, 'status_rank')
+      .addSelect(PRIORITY_RANK_SQL, 'priority_rank')
       .where('i.deleted_at IS NULL');
 
     if (q.status) qb.andWhere('i.status = :status', { status: q.status });
@@ -61,17 +87,30 @@ export class IssuancesService {
     if (q.city) qb.andWhere('i.address_city = :city', { city: q.city });
     if (q.customer) qb.andWhere('i.customer_name ILIKE :customer', { customer: `%${q.customer}%` });
     if (q.date) qb.andWhere('i.delivery_date = :date', { date: q.date });
-    if (q.courier_id) qb.andWhere('task.courier_id = :courierId AND task.status = :pending', { courierId: +q.courier_id, pending: TaskStatus.pending });
+    if (q.courier_id) {
+      qb.andWhere('EXISTS (SELECT 1 FROM delivery_tasks t WHERE t.issuance_id = i.id AND t.courier_id = :courierId AND t.status = :pending)', { courierId: +q.courier_id, pending: TaskStatus.pending });
+    }
     if (q.search) {
       qb.andWhere('(i.sap_number ILIKE :s OR i.customer_name ILIKE :s OR i.address_street ILIKE :s OR i.address_city ILIKE :s)', { s: `%${q.search}%` });
     }
 
-    //'urgent' > 'normal' alphabetically, so DESC puts the urgent rows first. cheap trick, replace if a third priority shows up
-    qb.orderBy('i.priority', 'DESC').addOrderBy('i.delivery_date', 'ASC', 'NULLS LAST').addOrderBy('i.id', 'ASC');
+    const total = await qb.getCount();
 
-    const [rows, total] = await qb.skip((page - 1) * pageSize).take(pageSize).getManyAndCount();
-    // console.log('issuances.list', { page, pageSize, total });
-    return { rows: rows.map(withCurrentTask), total, page, page_size: pageSize };
+    if (sortKey) {
+      qb.orderBy(SORT_COLUMNS[sortKey], dir, 'NULLS LAST').addOrderBy('i.id', 'ASC');
+    } else {
+      //nothing chosen: urgent first, then by delivery date, the order the board has opened with from day one
+      qb.orderBy('priority_rank', 'ASC').addOrderBy('i.delivery_date', 'ASC', 'NULLS LAST').addOrderBy('i.id', 'ASC');
+    }
+
+    const ids = (await qb.offset((page - 1) * pageSize).limit(pageSize).getRawMany()).map((r) => +r.id);
+    if (!ids.length) return { rows: [], total, page, page_size: pageSize };
+
+    const entities = await this.issuances.find({ where: { id: In(ids) }, relations: { items: true, tasks: { courier: true } } });
+    //find() has its own order, the id list is the order of the page
+    const byId = new Map(entities.map((e) => [e.id, e]));
+    // console.log('issuances.list', { page, pageSize, total, sortKey, dir });
+    return { rows: ids.map((id) => withCurrentTask(byId.get(id))), total, page, page_size: pageSize };
   }
 
   /*──────────────────────────────────────────────────────────────────────────*/

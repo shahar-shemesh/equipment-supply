@@ -197,4 +197,7 @@ export const he = {
     menu: "תפריט",
     select_all: "בחירת הכל",
     row_actions: "פעולות",
+    sort_by: "מיון לפי",
+    sort_default: "ברירת מחדל",
+    sort_toggle_dir: "הפיכת כיוון המיון",
 };

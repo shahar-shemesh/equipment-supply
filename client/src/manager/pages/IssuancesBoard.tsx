@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Alert, Button, Snackbar } from "@mui/material";
 import QrCodeScannerIcon from "@mui/icons-material/QrCodeScanner";
 
-import { IIssuance } from "../../../../shared/@core";
+import { IIssuance, ISortState } from "../../../../shared/@core";
 import { get, patch, post, errorMessage } from "../../utils/service";
 import { formatDateTime } from "../../utils/format";
 import { BoardFilters, emptyFilters } from "../components/BoardFilters";
@@ -19,6 +19,7 @@ export default function IssuancesBoard() {
   const { t } = useTranslation();
 
   const [filters, setFilters] = useState<any>(emptyFilters);
+  const [sort, setSort] = useState<ISortState>(null); //null = the server's default order, urgent first then by date
   const [page, setPage] = useState(1);
   const [data, setData] = useState<{ rows: IIssuance[]; total: number }>({ rows: [], total: 0 });
   const [loading, setLoading] = useState(false);
@@ -33,7 +34,7 @@ export default function IssuancesBoard() {
   async function load() {
     setLoading(true);
     try {
-      const params = { ...filters, page, page_size: PAGE_SIZE };
+      const params = { ...filters, sort: sort?.key, order: sort?.dir, page, page_size: PAGE_SIZE };
       const [res, c, s] = await Promise.all([get("/issuances", params), get("/couriers"), get("/issuances/summary")]);
       // console.log("board data", res);
       setData(res);
@@ -51,10 +52,15 @@ export default function IssuancesBoard() {
 
   useEffect(() => {
     load();
-  }, [filters, page]);
+  }, [filters, page, sort]);
 
   function changeFilters(next: any) {
     setFilters(next);
+    setPage(1);
+  }
+
+  function changeSort(next: ISortState) {
+    setSort(next);
     setPage(1);
   }
 
@@ -130,6 +136,8 @@ export default function IssuancesBoard() {
           loading={loading}
           selected={selected}
           onSelect={setSelected}
+          sort={sort}
+          onSort={changeSort}
           onOpen={(row) => setDetailId(row.id)}
           onAction={onRowAction}
         />

@@ -214,3 +214,30 @@ describe('report vs reassignment race', () => {
         }
     });
 });
+
+describe('board sorting', () => {
+    it('sorts by customer both ways, by courier with the unassigned last, and rejects an unknown column', async () => {
+        const f = await fixture();
+        //two more without a courier, names picked so the alphabet and the insertion order disagree
+        await ds.getRepository(Issuance).save([
+            { sap_number: '7000002', status: IssuanceStatus.unassigned, customer_name: 'תמר', address_street: 'y', address_city: 'z' },
+            { sap_number: '7000003', status: IssuanceStatus.unassigned, customer_name: 'אבי', address_street: 'y', address_city: 'z' },
+        ] as any);
+        const list = (query: string) => request(app.getHttpServer()).get(`/api/issuances?${query}`).set('Authorization', `Bearer ${f.managerToken}`);
+
+        const asc = await list('sort=customer&order=asc');
+        expect(asc.status).toBe(200);
+        expect(asc.body.rows.map((r) => r.customer_name)).toEqual(['אבי', 'ישראל ישראלי', 'תמר']);
+
+        const desc = await list('sort=customer&order=desc');
+        expect(desc.body.rows.map((r) => r.customer_name)).toEqual(['תמר', 'ישראל ישראלי', 'אבי']);
+
+        //only the fixture issuance has a courier: it leads, the two without one follow in id order
+        const byCourier = await list('sort=courier&order=asc');
+        expect(byCourier.body.rows.map((r) => r.sap_number)).toEqual(['7000001', '7000002', '7000003']);
+        expect(byCourier.body.rows[0].current_task.courier.name).toBe('courier one');
+        expect(byCourier.body.total).toBe(3);
+
+        expect((await list('sort=password')).status).toBe(400);
+    });
+});

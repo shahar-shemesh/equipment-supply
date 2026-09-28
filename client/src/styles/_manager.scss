@@ -183,6 +183,31 @@
         background: var(--color-surface-2);
     }
 
+    // every column sorts. the faint up/down glyph from the design sits on the idle ones, a solid arrow on the sorted one
+    th.sortable {
+        cursor: pointer;
+        user-select: none;
+
+        > span {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .sort-hint {
+            opacity: 0.45;
+        }
+
+        &:hover .sort-hint {
+            opacity: 0.9;
+        }
+
+        &.is-sorted {
+            color: var(--color-primary);
+            font-weight: 600;
+        }
+    }
+
     tr.is-selected td {
         background: var(--color-primary-lighter);
     }
@@ -281,6 +306,15 @@
         opacity: 0.6;
     }
 
+    // select all on the start side, the sort control on the end side. on a narrow phone the sort drops to its own line
+    &__toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
     &__select-all {
         display: flex;
         align-items: center;
@@ -290,6 +324,17 @@
         cursor: pointer;
         // lines the checkbox up with the ones inside the cards below
         padding-inline-start: 4px;
+    }
+
+    &__sort {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+
+        .MuiTextField-root {
+            min-width: 160px;
+            background: var(--color-surface);
+        }
     }
 
     &__empty {

@@ -147,7 +147,7 @@ All routes are under `/api` and need `Authorization: Bearer <token>` except logi
 | Route | Role | What |
 | --- | --- | --- |
 | `POST /auth/login`, `GET /auth/me`, `GET /auth/dev-accounts` | | development login |
-| `GET /issuances`, `GET /issuances/:id`, `GET /issuances/summary` | manager | board, detail, the cities widget |
+| `GET /issuances`, `GET /issuances/:id`, `GET /issuances/summary` | manager | board (`?sort=number|customer|destination|city|courier|priority|status&order=asc|desc`, filters, paging), detail, the cities widget |
 | `PATCH /issuances/:id` | manager | priority, delivery date, notes, self pickup |
 | `POST /issuances/assign`, `POST /issuances/mark-urgent` | manager | bulk actions |
 | `DELETE /issuances/:id` | manager | soft delete with a reason |
