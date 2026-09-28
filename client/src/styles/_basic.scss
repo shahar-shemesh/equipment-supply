@@ -110,6 +110,24 @@ a {
     color: var(--color-primary);
 }
 
+// the ministry logo (Logo.tsx). inherits the color of wherever it sits, 32px tall, the svg keeps its 38:57 ratio
+.logo {
+    display: inline-flex;
+    height: 32px;
+    line-height: 0;
+    flex-shrink: 0;
+
+    svg {
+        height: 100%;
+        width: auto;
+        display: block;
+    }
+
+    &--dark {
+        color: var(--color-primary);
+    }
+}
+
 .muted {
     color: var(--color-text-secondary);
 }

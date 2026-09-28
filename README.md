@@ -1,159 +1,65 @@
-# מערכת ניפוק ציוד דיגיטלית
+# Digital equipment issuance system
 
-מסמך אפיון ראשוני למערכת Web לניהול ניפוק ומסירת ציוד. המערכת מחליפה תהליך ידני בנייר: מקבלת בקשות או משלוחים מ-SAP, מאפשרת למנהל להקצות אותם לשליחים, מתעדת מסירה וחתימת מקבל, ומחזירה סטטוס ל-SAP.
+A web system for issuing and delivering equipment, built for the Israeli Ministry of Defense. It replaces a paper process: SAP creates an issuance document, a warehouse manager assigns it to a courier, the courier delivers it from a tablet, collects the recipient's signature, and the outcome goes back to the manager and (later) to SAP.
 
-> המסמך מבוסס על האפיון שסופק. זהו אפיון מוצר, ולא תיעוד של מערכת שכבר מומשה. סעיף "החלטות פתוחות" מרכז פרטים שחסרים לפני פיתוח.
+Two user interfaces share one backend:
 
-## מטרות
+- **Warehouse manager**, desktop first: the issuances board, assignment, priorities, self pickup, deletion.
+- **Courier**, tablet first: the delivery board, the delivery report with a per item result, the signature.
 
-- מעקב בזמן אמת אחר בקשות ניפוק, משלוחים ומצב הביצוע.
-- זיהוי מהיר של פרטי הציוד או הבקשה באמצעות QR, עם אפשרות להזנה ידנית.
-- תיעוד זהות השליח והמקבל, מועד המסירה, חתימה ואסמכתאות.
-- סנכרון נתוני הבקשה והסטטוסים עם SAP.
-- צפייה בהיסטוריה, הפקת אישורים ודוחות ביצוע.
+The UI is Hebrew and right to left. The Figma exports the screens follow live under `design/` (not committed, see [Design references](#design-references)). The original Hebrew specification and the running notes written during development are in [docs/README.he.md](docs/README.he.md).
 
-## משתמשים והרשאות
+## Status
 
-| תפקיד | פעולות עיקריות |
+What runs today:
+
+- Manager board with search, filters, paging, bulk assign and mark urgent, the issuance detail dialog (priority, delivery date, self pickup, delete with a reason), couriers list, reports placeholder.
+- Courier board with tabs and search, grouped cards for the same address, the delivery report (per item delivered / not delivered with a reason, recipient, signature), lookup by issuance number.
+- NestJS API with role based access, server side validation of the delivery report, status transition rules, row locking for concurrent requests.
+- PostgreSQL schema, a seed with 30 sample issuances, 34 tests.
+- Responsive layout for phone, tablet and desktop.
+
+What does not exist: the SAP interface, QR camera scanning, history and analytics screens, PDF / SMS / email confirmations, courier management beyond a list, database migrations, production authentication. Details under [Sample data and what is missing](#sample-data-and-what-is-missing).
+
+## Stack
+
+| Part | Technology |
 | --- | --- |
-| מנהל מערכת | כניסה וניהול משתמשים ושליחים, הקצאת משלוחים, מעקב ודוחות |
-| שליח / מנפק | צפייה במשימות שהוקצו לו, סריקת QR או הזנה ידנית, מסירה ותיעוד חתימה |
-| מנהל לוגיסטיקה | צפייה בהיסטוריה, ניתוח נתונים ודוחות, בהתאם להרשאות שיוגדרו |
-| SAP | מערכת חיצונית המחליפה נתוני בקשות, משלוחים וסטטוסים דרך ממשק אינטגרציה |
+| `client/` | React 18, TypeScript, Vite, MUI 5 with an RTL emotion cache, SCSS, react-router 6, react-i18next |
+| `server/` | NestJS 10, TypeORM 0.3, PostgreSQL 16, JWT (`@nestjs/jwt`), Jest + supertest |
+| `shared/` | Enums and interfaces (`@core.ts`), helpers (`@utils.ts`), the Hebrew dictionary (`i18n/he.ts`). Imported by both sides |
+| root | `docker-compose.yml` for PostgreSQL |
 
-## תהליך העבודה המרכזי
+## Repository layout
 
-1. SAP מעביר בקשת ניפוק או משלוח למערכת.
-2. המערכת מקשרת לבקשה פרטי ציוד ומזהה QR מתאים.
-3. המנהל מקצה את המשלוח לשליח, והשליח מקבל עדכון על משימה חדשה.
-4. השליח מגיע ליעד וסורק QR. אם הסריקה אינה אפשרית, הוא מזין פרטים ידנית.
-5. המערכת מציגה את פרטי הציוד, הבקשה והמשלוח לבדיקה.
-6. המקבל מאשר את המסירה בחתימה דיגיטלית. ניתן לתעד תמונות או אסמכתאות והערות.
-7. המערכת שומרת את אירוע הניפוק, מעדכנת סטטוס ושולחת את הנתונים הנדרשים ל-SAP.
-8. ניתן להפיק אישור PDF, לשלוח אישור ב-SMS או בדוא"ל ולצפות בפעולה בהיסטוריה.
+```
+client/src
+  components/      Logo, StatusBadge
+  courier/         CourierLayout, pages (DeliveryBoard, TaskDetailPage), components (TaskCard, ItemReportCard, SignaturePad, FindIssuanceDialog)
+  manager/         ManagerLayout, pages (IssuancesBoard, CouriersPage, ReportsPage), components (IssuancesTable, IssuanceCard, BoardFilters, SideWidgets, AssignCourierDialog, IssuanceDetailDialog)
+  pages/           LoginPage
+  routers/         AppRouter (two route trees: /manager and /courier)
+  styles/          _breakpoints, _basic, _layouts, _layout-manager, _layout-courier, _manager, _courier, _badges, _login
+  theme/           RtlTheme (MUI theme + rtl cache + full screen dialogs on phones)
+  utils/           service (axios), auth (context), format, useBreakpoint
+  assets/          mod.svg (the logo)
+server/src
+  auth/            dev-local login, jwt guard, roles
+  issuances/       manager side: board queries, assign, update, delete, transition rules
+  couriers/        couriers with their open task count
+  delivery/        courier side: my tasks, delivery report, payload validation
+  entities/        TypeORM entities
+  seed/            sample data
+  e2e/             database backed tests
+  env.ts           the LOCAL / production switches
+shared/            @core.ts, @utils.ts, i18n/
+design/            Figma exports (git ignored)
+docs/              README.he.md (original spec + Hebrew notes)
+```
 
-## מסכים ויכולות
+## Running locally
 
-### דשבורד (`/`)
-
-- תמונת מצב של ניפוקים פעילים, ממתינים והושלמו.
-- התראות ואירועים דחופים, סטטיסטיקות ומדדי ביצוע.
-- תצוגה בהתאם לתפקיד המשתמש ועדכון נתונים בזמן אמת.
-
-### סריקת QR (`/scan`)
-
-- שימוש במצלמת המכשיר לסריקה וזיהוי פרטי הבקשה או הציוד.
-- הצגת נתוני הפריט או המשלוח לאחר זיהוי, לצד טיפול בסריקה שגויה.
-- מעבר להזנה ידנית ושמירת תיעוד סריקות לצורכי בקרה.
-
-### הזנה ידנית (`/manual-entry`)
-
-- הזנת מזהה ציוד, פרטי מקבל, תאריך, כמות והערות, לפי הנתונים הזמינים.
-- שדות חובה, בדיקות תקינות והשלמת פרטים מתוך SAP ככל שהממשק מאפשר.
-- שמירת טיוטה והצגת אישור לפני השלמת הניפוק.
-
-### פרטי ניפוק (`/issuanceDetail`)
-
-- הצגת פרטי ניפוק, ציוד, שליח, יעד, תאריך וסטטוס.
-- חתימת מקבל על מסך מגע, שמירת תמונות ואסמכתאות, ועדכון סטטוס.
-- הצגת היסטוריית שינויים, הפקת אישור PDF ושליחת אישור בדוא"ל או ב-SMS.
-- העברת העדכון ל-SAP לאחר השלמת הניפוק.
-
-### היסטוריה (`/history`)
-
-- רשימת ניפוקים עם מיון, סינון וחיפוש לפי מזהה, שליח, סטטוס ותקופה.
-- דפדוף בין עמודים, צפייה בפרטי רשומה וייצוא CSV או Excel.
-- סינון המידע בהתאם להרשאות המשתמש.
-
-### אנליטיקה (`/analytics`)
-
-- מדדים וגרפים לפי תקופה, שליח וציוד.
-- נתוני השלמה, זמני טיפול ומגמות לאורך זמן.
-- ייצוא דוחות PDF או Excel בהתאם להרשאות.
-
-### ניהול (`/admin/*`)
-
-- כניסת מנהל עם אימות, ניהול סשן וניסיון כניסה מוגבל.
-- יצירה וניהול שליחים, שדות זיהוי ופרטי קשר, אזורי עבודה וייבוא CSV או Excel.
-- צפייה במשלוחים הממתינים להקצאה, הקצאה לשליח או לכמה שליחים בהתאם לחוקי העסק, ועדכון השליח.
-- מעקב אחר הקצאות וסטטוסי משלוחים.
-
-## מודל נתונים ראשוני
-
-| ישות | שדות מרכזיים | קשרים |
-| --- | --- | --- |
-| `User` | `id`, `username`, `role`, `email`, `lastLogin` | משתמשים ושליחים |
-| `Courier` | `id`, `name`, `employeeId`, `phone`, `email`, `zones` | משלוחים וניפוקים |
-| `Shipment` | `id`, `origin`, `destination`, `priority`, `assignedAt` | שליח וניפוקים |
-| `Equipment` | `id`, `qrCode`, `type`, `description`, `status` | ניפוקים |
-| `Issuance` | `id`, `date`, `status`, `notes`, `signature`, `createdAt` | שליח, משלוח וציוד |
-
-המודל הוא נקודת פתיחה בלבד. שדות מזהי SAP, הקשר בין בקשה, משלוח ופריט, ריבוי פריטים במשלוח, והרשאות בין משתמש לשליח מחייבים אישור מול הגורמים העסקיים.
-
-חתימה תישמר כתמונה בפורמט מוגדר, לצד מזהה הניפוק וחותמת זמן, עם גישה מוגבלת לאחסון.
-
-## אינטגרציות
-
-- **SAP:** קבלת בקשות ומשלוחים, שיוך נתונים מזהים, ודיווח על מסירה וסטטוס. יש להגדיר ממשק, מיפוי שדות, כיוון התעבורה, אימות, טיפול בשגיאות וניסיונות חוזרים.
-- **מצלמה:** סריקת QR דרך מכשיר השליח.
-- **אחסון קבצים:** חתימות, תמונות ואסמכתאות בהרשאות מתאימות.
-- **הודעות:** עדכון שליח ואישור מסירה דרך SMS או דוא"ל, בהתאם לשירותים שייבחרו.
-- **מסמכים:** יצירת אישור מסירה ב-PDF וייצוא נתונים ל-CSV או Excel.
-
-## דרישות ממשק ומגבלות
-
-- ממשק בעברית בכיוון RTL, כולל שימוש נוח בטלפון לשליחים ובמחשב למנהלים.
-- תמיכה בדפדפנים מודרניים ובמכשירי iOS ו-Android.
-- אין באפיון תמיכה בעבודה ללא חיבור לרשת. פעולות מסירה מחייבות תקשורת זמינה.
-- יש לוודא הרשאות לצפייה ולשינוי מידע, תיעוד אירועים ושמירה מאובטחת של חתימות וקבצים.
-- מדדי זמן תגובה, עומסים, זמינות ומשך שמירת מידע טרם הוגדרו.
-
-## סדר מימוש מוצע
-
-1. **תשתית ותהליך בסיסי:** חיבור ל-SAP, ניהול זהויות ומשלוחים, הקצאה, QR ומסך ניפוק.
-2. **ביצוע מסירה:** הזנה ידנית, חתימה, אסמכתאות, עדכון סטטוס, היסטוריה ואישור מסירה.
-3. **ניהול ודיווח:** דשבורד עשיר, אנליטיקה, ייצוא דוחות ושיפורי תפעול.
-
-חלוקה זו היא הצעה לתכנון, ולא לוח זמנים שאושר.
-
-## החלטות פתוחות לפני פיתוח
-
-1. מהו אובייקט המקור ב-SAP: בקשת ניפוק, הזמנה, משלוח או פריט ציוד? איזה מזהה מופיע ב-QR ומי יוצר אותו?
-2. האם משלוח כולל כמה פריטים וכמה מקבלים? האם מותרת מסירה חלקית או כמה ניסיונות מסירה?
-3. מהם הסטטוסים, חוקי המעבר ביניהם, ומתי ניפוק נחשב סופי?
-4. מהו הממשק המוסכם עם SAP, ומה קורה כששמירה מקומית מצליחה אך עדכון SAP נכשל?
-5. מי רשאי לראות חתימות, תמונות ופרטים אישיים, ולכמה זמן יש לשמור אותם?
-6. האם נדרש אימות זהות של המקבל מעבר לחתימה, ומה נחשב ראיה קבילה למסירה?
-7. האם קיימת חובה עסקית לעבודה ללא רשת? האפיון הנוכחי אינו כולל תמיכה בכך.
-8. אילו ערוצי התראה וייצוא נדרשים כבר בגרסה הראשונה?
-
-## קריטריוני קבלה ראשוניים
-
-- מנהל יכול להקצות משלוח שהתקבל לשליח, והשליח רואה אותו ברשימת המשימות שלו.
-- סריקת QR תקין פותחת את הפרטים המתאימים; QR לא מוכר מציג שגיאה ברורה ומאפשר הזנה ידנית.
-- לא ניתן להשלים מסירה ללא שדות החובה ואישור המקבל לפי הכללים שיוגדרו.
-- אירוע שהושלם נשמר עם זמן, שליח, מזהים, סטטוס וחתימה, ומופיע בהיסטוריה למשתמש מורשה.
-- השלמת מסירה מעדכנת את SAP או מציגה ומאפשרת טיפול בכשל סנכרון, בלי לאבד את האירוע.
-
----
-
-# הפרויקט בפועל: בסיס להרצה מקומית
-
-הריפו מכיל עכשיו יישום שרץ מקומית ומכסה את הזרימה המרכזית: מנהל מחסן משייך הנפקות לשליחים בדסקטופ, ושליח מדווח מסירה עם חתימה מטאבלט. המסכים עוקבים אחרי העיצוב בתיקיית `design/` (יצוא PNG מפיגמה, לא נכנס ל-git), ולא אחרי הניסוחים הישנים באפיון שלמעלה. איפה שהעיצוב וה-README חלוקים, העיצוב קובע: "הנפקה" ולא "ניפוק", "משנע" ולא "שליח".
-
-## מבנה
-
-| תיקייה | מה יש בה |
-| --- | --- |
-| `client/` | React 18 + TypeScript + Vite. MUI 5 עם RTL, SCSS, react-router, i18next. |
-| `server/` | NestJS 10 + TypeORM + PostgreSQL. |
-| `shared/` | enums וממשקים (`@core.ts`), עזרים (`@utils.ts`) ומילון העברית (`i18n/he.ts`). משותף לשני הצדדים. |
-| `design/` | יצוא המסכים מפיגמה ודיאגרמת ארכיטקטורת המידע. ב-`.gitignore`. |
-| `docker-compose.yml` | PostgreSQL 16 על פורט 5433 (5432 היה תפוס במכונה שבה זה נבנה). |
-
-## הרצה
-
-דרישות: Node 20, Docker Desktop.
+Requirements: Node 20, Docker Desktop.
 
 ```bash
 docker compose up -d
@@ -167,116 +73,142 @@ cd server && npm install && cp .env.example .env && npm run seed && npm run star
 cd client && npm install && npm run dev
 ```
 
-הלקוח ב-http://localhost:5173 ומפנה `/api` לשרת ב-3000. `npm run seed` מוחק את כל הטבלאות ומכניס את נתוני הדוגמה מחדש, אפשר להריץ אותו בכל פעם שרוצים להתחיל נקי. הסכמה נבנית מה-entities עם `synchronize: true`, בלי migrations. זה מספיק לבסיס מקומי וצריך להתחלף לפני סביבה משותפת.
+Open http://localhost:5173. Vite proxies `/api` to the NestJS server on port 3000. PostgreSQL is exposed on host port 5433 (5432 was taken on the machine this was built on; change it in `docker-compose.yml` and `server/.env` together).
 
-חשבונות פיתוח, כולם עם הסיסמה `1234`:
+`npm run seed` truncates every table and inserts the sample set again, run it whenever you want a clean start. The schema is built from the entity classes with TypeORM `synchronize`; that is fine for a laptop and has to become migrations before there is a shared environment.
 
-| משתמש | תפקיד | מה רואים |
+Development accounts, all with the password `1234`:
+
+| Username | Role | Sees |
 | --- | --- | --- |
-| `manager`, `manager2` | מנהל מחסן | לוח ניהול הנפקות, ניהול שליחים, דוחות |
-| `courier1`, `courier2`, `courier3` | משנע | לוח משלוחים ופרטי הנפקה |
+| `manager`, `manager2` | warehouse manager | issuances board, couriers, reports |
+| `courier1`, `courier2`, `courier3` | courier | delivery board and the delivery report |
 
-הרשימה מוצגת גם בעמוד הכניסה, כי השרת רץ ב-`AUTH_STRATEGY=dev-local`.
+The login page lists them as long as the server runs with `ENVIRONMENT=LOCAL`.
 
-## אימות: פיתוח מול ייצור
+`.claude/launch.json` has `server` and `client` entries for the desktop app's preview.
 
-מה שקיים הוא אימות פיתוח בלבד: שם משתמש וסיסמה מול טבלת `users` שנזרעה, ו-JWT ב-localStorage. הוא יושב ב-`server/src/auth` ומסומן ככזה בקוד. שיטת ההזדהות בייצור לא נקבעה (בדיאגרמה: "אימייל וסיסמא או הזדהות לאומית?"), ולכן לא נבנה כאן 2FA, הזדהות לאומית או SSO. כשתתקבל החלטה, החלק שמתחלף הוא הנפקת הטוקן ב-`auth.service.ts` ועמוד הכניסה. ה-guard, התפקידים והמסכים לא תלויים בזה.
+## Environment switches
 
-## מודל הנתונים
+`server/src/env.ts` is the one place that decides whether this is a developer's machine. `ENVIRONMENT=LOCAL` is an explicit opt in; anything else, or `NODE_ENV=production`, turns every developer convenience off:
 
-לפני הסכמה, ההבחנה בין המושגים, כי האפיון והעיצוב משתמשים ב"הנפקה" לכמה דברים שונים:
+| Switch | LOCAL | Anything else |
+| --- | --- | --- |
+| `JWT_SECRET` | the dev default is accepted | required and must differ from the default, otherwise the server refuses to start |
+| `AUTH_STRATEGY=dev-local` | works | refused at startup unless `ALLOW_DEV_AUTH=true` (a test box with no identity provider yet, logged loudly) |
+| `GET /api/auth/dev-accounts` | returns the seeded accounts | always empty |
+| `npm run seed` | needs `ALLOW_DESTRUCTIVE_SEED=true` | refused |
+| TypeORM `synchronize` | needs `DB_SYNCHRONIZE=true` | off |
 
-- **הנפקה** (`issuances`): מסמך ה-SAP. מי הלקוח, לאן, מה העדיפות. קיים גם אם אף אחד עוד לא נשלח למסור אותו. הסטטוס שלו משקף את התוצאה האחרונה.
-- **פריט בהנפקה** (`issuance_items`): שורת מוצר במסמך, עם מק"ט, מספר תחנה וסריאלי. השליח עונה "נמסר / לא נמסר" לכל פריט בנפרד, ומכאן מסירה חלקית.
-- **משימת מסירה** (`delivery_tasks`): "לך תמסור הנפקה X", שיוך של הנפקה אחת לשליח אחד לתאריך. זה מה שלוח המשלוחים של השליח מציג. שינוי שליח מבטל את המשימה הישנה ופותח חדשה, כך שההיסטוריה של מי החזיק את זה נשמרת.
-- **שליח / משנע** (`couriers`): מי שמוביל בפועל. נפרד מ-`users`: שליח קיים במערכת גם בלי חשבון כניסה (שתי חברות חיצוניות בנתוני הדוגמה).
-- **ניסיון מסירה** (`delivery_attempts` + `delivery_attempt_items`): מה שהשליח דיווח בדלת: מי קיבל, החתימה, ותוצאה לכל פריט עם סיבת אי מסירה. היום ניסיון אחד סוגר משימה. אם יוגדר "ניסיון חוזר מחר", הטבלה כבר מוכנה לכמה ניסיונות על אותה משימה.
+`server/.env.example` documents every variable.
 
-סטטוסי הנפקה: `unassigned` (לא שובץ), `assigned` (שובץ למשנע, ואצל השליח: ממתין), `delivered`, `partially_delivered`, `not_delivered`, `self_pickup`, `deleted`. מחיקה היא soft delete עם סיבה, כמו שהעיצוב מבקש.
+## Authentication
 
-## הנחות עבודה שלא נסגרו
+Only development authentication exists: username and password against the seeded `users` table, a JWT in localStorage, a guard that checks the role per route. It lives in `server/src/auth` and is marked as such in the code and on the login page.
 
-רשומות כאן במקום להיות קבורות בקוד. הארכיטקטורה לא ננעלה עליהן:
+The production identity source is not decided (the information architecture diagram asks: email and password, or national identification?). No 2FA, national identity flow or SSO was built on a guess. When the decision comes, the parts that change are token issuing in `auth.service.ts` and `LoginPage.tsx`; the guard, the roles and the screens stay.
 
-1. הנפקה שלא נמסרה חוזרת ללוח המנהל עם הסטטוס, והמנהל מחליט אם לשייך מחדש. לא נבנה ניסיון חוזר אוטומטי.
-2. איסוף עצמי סוגר את הצד של השליח. מה SAP צריך לשמוע על זה לא ידוע.
-3. קיבוץ "2 הנפקות" לאותו לקוח וכתובת הוא תצוגה בלבד. אין ישות קבוצה ב-DB.
-4. אות הקידומת במספר ההנפקה (ס' / ד' / כ') נשמרת בעמודה נפרדת ולא מפורשת. אף אחד לא הסביר מה היא.
-5. החתימה נשמרת כ-PNG בתוך ה-DB. האפיון מבקש אחסון קבצים מוגבל הרשאות, זה שלב הבא.
-6. שליח אחד להנפקה. "הקצאה לכמה שליחים" מהאפיון לא עוצבה.
-7. ממשק SAP לא הוגדר ולא הומצא. עמודת `source` בהנפקה מסמנת מאיפה היא הגיעה (`sample` לנתוני הדוגמה), וזה המקום היחיד שנוגע בזה.
-8. סדר המשימות של השליח הוא לפי עדיפות ותאריך. ידית הגרירה בכרטיס היא ויזואלית בלבד.
-9. הנפקה שנמסרה חלקית קפואה: אי אפשר לשייך אותה מחדש, למחוק או להעביר לאיסוף עצמי עד שיוחלט מה קורה עם הפריטים שכבר נמסרו. ראו "החלטה שנדרשת" בסעיף ההקשחה.
+## Domain model
 
-## מה משתמש בנתוני דוגמה או עדיין לא ממומש
+The spec and the designs use "issuance" (הנפקה) for several different things, so the schema separates them:
 
-- כל ההנפקות, השליחים והלקוחות מגיעים מ-`server/src/seed/seed.data.ts`. אין SAP.
-- סריקת QR: המודל מציג את מסגרת המצלמה מהעיצוב ועובד דרך הזנה ידנית של מספר. ספריית המצלמה ומה ה-QR מקודד עדיין פתוחים.
-- ניהול שליחים: רשימה בלבד. יצירה, עריכה וייבוא מאקסל בלי עיצוב.
-- דוחות ודאשבורד KPI: עמוד placeholder. בדיאגרמה יש סימן שאלה על ההגדרה.
-- היסטוריה, אנליטיקה, PDF, SMS ודוא"ל: לא נבנו. אין להם מסך בעיצוב.
-- כפתור "איתור הנפקה" בצד המנהל ממקד את החיפוש, כי ההתנהגות שלו שם לא הוגדרה.
+- **Issuance** (`issuances`): the SAP document. Who the customer is, where it goes, the priority. Exists whether or not anyone was sent to deliver it. Its status mirrors the latest delivery outcome.
+- **Issuance item** (`issuance_items`): one product line of the document, with catalog number, station number and serial. The courier answers delivered / not delivered per line, which is where partial delivery comes from.
+- **Delivery task** (`delivery_tasks`): "go deliver issuance X", one issuance handed to one courier for a date. This is what the courier's board lists. Reassigning cancels the old task and creates a new one, so the history of who had it stays.
+- **Courier** (`couriers`): whoever drives the equipment. Separate from `users`: a courier exists before anyone gives them a login (the sample data has two external companies without one).
+- **Delivery attempt** (`delivery_attempts` + `delivery_attempt_items`): what the courier reported at the door: who received, the signature, a result and reason per item. Today one attempt closes a task; the table is ready for several attempts per task if "try again tomorrow" becomes a rule.
+
+Issuance statuses (`IssuanceStatus` in `shared/@core.ts`): `unassigned`, `assigned` (the courier sees it as waiting), `delivered`, `partially_delivered`, `not_delivered`, `self_pickup`, `deleted` (soft delete with a reason).
+
+Terminology in the code follows the designers, not the original spec: issuance (not ניפוק), courier for משנע, warehouse manager for מנהל מחסן.
+
+## Rules enforced on the server
+
+**Status transitions.** `server/src/issuances/issuance.rules.ts` says from which status each manager action is allowed. Anything else is a 409 that names the issuance, its status and the action:
+
+| From | assign | self pickup | delete | edit (priority, date, notes) |
+| --- | --- | --- | --- | --- |
+| unassigned, assigned, not delivered | yes | yes | yes | yes |
+| self pickup | yes | no | yes | yes |
+| delivered | no | no | no | no |
+| partially delivered | no | no | no | no |
+| deleted | no | no | no | no |
+
+Bulk assignment is all or nothing: one closed issuance in the selection fails the whole batch and nothing is written. Mark urgent skips closed rows and reports how many changed.
+
+**Delivery report validation** (`server/src/delivery/attempt.validation.ts`): exactly one answer per item, no unknown or duplicate item ids, `delivered` must be a real boolean, a reason from the closed list plus details up to 100 characters only on a line that was not delivered, another recipient needs name, numeric id and phone, the signature must be a real PNG (magic bytes checked) up to 1 MB. The outcome is derived from the validated answers, never taken from the body. The JSON body is capped at 2 MB.
+
+**Concurrency.** Every change to an issuance or its tasks locks the issuance row first (`SELECT ... FOR UPDATE`), always in the same order: issuance, then task. Two reports on the same task, or a report racing a reassignment, run one after the other and the second gets a 409. Closing a task is a conditional update on `status = pending` inside the same transaction, so nothing closes twice even without the lock. Related status changes are written together or not at all.
 
 ## API
 
-כל הנתיבים תחת `/api`, דורשים `Authorization: Bearer <token>` חוץ מהכניסה.
+All routes are under `/api` and need `Authorization: Bearer <token>` except login.
 
-| נתיב | תפקיד | מה |
+| Route | Role | What |
 | --- | --- | --- |
-| `POST /auth/login`, `GET /auth/me`, `GET /auth/dev-accounts` | | כניסת פיתוח |
-| `GET /issuances`, `GET /issuances/:id`, `GET /issuances/summary` | מנהל | לוח, פרטים, ווידג'ט ערים |
-| `PATCH /issuances/:id` | מנהל | עדיפות, מועד חלוקה, איסוף עצמי |
-| `POST /issuances/assign`, `POST /issuances/mark-urgent` | מנהל | פעולות על כמה הנפקות |
-| `DELETE /issuances/:id` | מנהל | מחיקה רכה עם סיבה |
-| `GET /couriers` | מנהל | שליחים עם עומס |
-| `GET /delivery/tasks`, `GET /delivery/tasks/:id` | משנע | המשימות שלי |
-| `POST /delivery/tasks/:id/attempts` | משנע | דיווח מסירה |
-| `GET /delivery/lookup?number=` | משנע | איתור לפי מספר הנפקה |
+| `POST /auth/login`, `GET /auth/me`, `GET /auth/dev-accounts` | | development login |
+| `GET /issuances`, `GET /issuances/:id`, `GET /issuances/summary` | manager | board, detail, the cities widget |
+| `PATCH /issuances/:id` | manager | priority, delivery date, notes, self pickup |
+| `POST /issuances/assign`, `POST /issuances/mark-urgent` | manager | bulk actions |
+| `DELETE /issuances/:id` | manager | soft delete with a reason |
+| `GET /couriers` | manager | couriers with their open task count |
+| `GET /delivery/tasks`, `GET /delivery/tasks/:id` | courier | my tasks (`?tab=all|pending|done&search=`) |
+| `POST /delivery/tasks/:id/attempts` | courier | the delivery report |
+| `GET /delivery/lookup?number=` | courier | find my task by the printed number |
 
-## הקשחת הזרימות
+## Responsive layout
 
-הזרימות של שיוך ודיווח מסירה נבדקות בצד השרת, בלי להסתמך על המסך.
+Breakpoints are the same numbers in SCSS (`client/src/styles/_breakpoints.scss`) and TypeScript (`client/src/utils/useBreakpoint.ts`) and match the MUI theme:
 
-**מעברי סטטוס.** הטבלה ב-`server/src/issuances/issuance.rules.ts` אומרת מאיזה סטטוס מותרת כל פעולה של המנהל. פעולה שלא ברשימה מחזירה 409 עם הודעה שמציינת את ההנפקה, הסטטוס והפעולה:
-
-| מסטטוס | שיוך | איסוף עצמי | מחיקה | עריכה (עדיפות, מועד, הערות) |
-| --- | --- | --- | --- | --- |
-| לא שובץ, שובץ, לא נמסר | כן | כן | כן | כן |
-| איסוף עצמי | כן | לא | כן | כן |
-| נמסר | לא | לא | לא | לא |
-| נמסר חלקית | לא | לא | לא | לא |
-| נמחקה | לא | לא | לא | לא |
-
-שיוך של כמה הנפקות הוא הכל או כלום: הנפקה אחת סגורה בבחירה מכשילה את כל הקבוצה ושום דבר לא נכתב. "סימון כדחוף" מדלג על שורות סגורות ומחזיר כמה עודכנו.
-
-**החלטה שנדרשת.** מה עושים עם הנפקה שנמסרה חלקית? האפשרויות: משימה חדשה עם הפריטים שנותרו בלבד, השליח רואה את כל הפריטים כשהנמסרים מסומנים, או חזרה ל-SAP למסמך חדש. עד שתתקבל תשובה, ההנפקה קפואה והמנהל מקבל 409 כשהוא מנסה לשייך, למחוק או להעביר לאיסוף עצמי. המסך עדיין מציג את הכפתורים האלה, וההודעה מגיעה כ-toast באנגלית.
-
-**ולידציה של דיווח מסירה.** ב-`server/src/delivery/attempt.validation.ts`: תשובה אחת בדיוק לכל פריט, בלי מזהים לא מוכרים או כפולים, `delivered` חייב להיות boolean אמיתי, סיבה מהרשימה הסגורה ופירוט עד 100 תווים רק בשורה שלא נמסרה, מקבל "אדם אחר" עם שם, ת.ז. בספרות וטלפון, חתימה כ-PNG אמיתי (בדיקת magic bytes) עד 1MB. התוצאה נגזרת מהתשובות שעברו ולידציה ולא מה-body. גודל ה-body מוגבל ל-2MB.
-
-**מקביליות.** כל שינוי בהנפקה או במשימות שלה נועל קודם את שורת ההנפקה (`SELECT ... FOR UPDATE`), תמיד באותו סדר: הנפקה ואז משימה. כך שני דיווחים על אותה משימה, או דיווח מול שיוך מחדש, רצים אחד אחרי השני, והשני מקבל 409. סגירת המשימה היא update מותנה על `status = pending` בתוך אותה טרנזקציה, אז גם בלי הנעילה לא ייסגרו פעמיים. כל שינויי הסטטוס הקשורים נכתבים יחד או לא נכתבים.
-
-**מתגי פיתוח.** `server/src/env.ts` מרכז את ההחלטה "האם זה מחשב של מפתח". `ENVIRONMENT=LOCAL` הוא opt-in מפורש, ובלעדיו (או עם `NODE_ENV=production`):
-
-- השרת מסרב לעלות כשה-`JWT_SECRET` חסר או עדיין ברירת המחדל.
-- השרת מסרב לעלות עם `AUTH_STRATEGY=dev-local`, אלא אם `ALLOW_DEV_AUTH=true` הוגדר במפורש למכונת בדיקות בלי ספק זהות, ואז זה נרשם בלוג.
-- `/api/auth/dev-accounts` מחזיר רשימה ריקה תמיד, גם עם `ALLOW_DEV_AUTH`.
-- `npm run seed` מסרב לרוץ. גם ב-LOCAL הוא דורש `ALLOW_DESTRUCTIVE_SEED=true`.
-- `synchronize` של TypeORM כבוי. גם ב-LOCAL הוא דורש `DB_SYNCHRONIZE=true`.
-
-**בדיקות.** `cd server && npm test` מריץ הכל. `npm run test:unit` בודק את הוולידציה ואת טבלת המעברים בלי DB. `npm run test:e2e` מרים את האפליקציה מול מסד `equipment_supply_test` (נוצר לבד בקונטיינר) ובודק תשובות פגומות, שליחה כפולה במקביל, שיוך מחדש של הנפקה שהושלמה, ומירוץ בין דיווח לשיוך מחדש, חמש פעמים ברצף.
-
-## רספונסיביות
-
-כל המסכים עובדים בשלושה רוחבים. המספרים זהים ב-SCSS (`client/src/styles/_breakpoints.scss`) וב-TypeScript (`client/src/utils/useBreakpoint.ts`), ותואמים את ה-breakpoints של MUI:
-
-| טווח | שם | מה קורה |
+| Width | Name | What changes |
 | --- | --- | --- |
-| עד 599 | phone | ניווט המנהל בתפריט המבורגר, טבלת ההנפקות הופכת לכרטיסים, הווידג'טים מקופלים מתחת, כל מודל הופך למסך מלא, כרטיסי המשנע בשלוש שורות, כפתור השליחה נדבק מעל הסרגל התחתון |
-| 600 עד 899 | compact (טאבלט לאורך) | כמו טלפון בטבלת ההנפקות (כרטיסים), שאר המסכים בפריסה של טאבלט |
-| 600 עד 1199 | tablet | הווידג'טים בשני טורים מתחת לטבלה, כרטיס משנע בשורה אחת, שדות בשלוש עמודות |
-| 1200 ומעלה | desktop | ניווט בכותרת, טבלה מלאה |
-| 1440 ומעלה | wide | לוח ניהול ההנפקות בשני טורים, טבלה וווידג'טים זה לצד זה כמו בעיצוב |
+| up to 599 | phone | manager nav in a drawer, the issuances table becomes cards, widgets collapsed below the list, every dialog full screen, courier cards in three rows, the send button sticks above the bottom bar |
+| 600 to 899 | compact (portrait tablet) | still cards on the manager board, nine columns do not fit at 768 |
+| 600 to 1199 | tablet | widgets in two columns under the table, one row courier cards, filters in three columns |
+| 1200 and up | desktop | inline navigation, full table |
+| 1440 and up | wide | the two column board of the design, table and widgets side by side |
 
-בנוסף, במכשירי מגע (`hover: none`) כל כפתור, שדה, קישור טקסט ופריט תפריט מקבל גובה מינימלי של 44 פיקסלים, והסרגלים הקבועים מכבדים את ה-safe area של אייפון.
+On touch devices (`hover: none`) every button, field, text link and menu item gets a 44px minimum, and the fixed bars respect the iPhone safe area.
 
-שני דברים ששווה לדעת כשמוסיפים CSS: כלל עם class אחד על רכיב MUI מפסיד בתיקו לסגנון של MUI (הוא מוזרק אחרי הגיליון שלנו), אז לרכיבי MUI כותבים selector עם שני classes, למשל `.issuance-card__menu.MuiIconButton-root`. ו-`overflow-x` יושב על `html` בלבד: על `body` הוא היה הופך אותו למכולת גלילה והורג כל `position: sticky`.
+Two CSS notes worth knowing before adding styles: a single class rule on a MUI component loses the specificity tie to MUI's own emotion styles (they are injected after our sheet), so target MUI components with two classes, like `.issuance-card__menu.MuiIconButton-root`. And `overflow-x` sits on `html` only; on `body` it would turn body into the scroll container and kill every `position: sticky`.
+
+## Tests
+
+```bash
+cd server && npm test
+```
+
+`npm run test:unit` covers the payload validation and the transition table without a database. `npm run test:e2e` boots the real application against `equipment_supply_test` (created automatically in the Docker container) and checks malformed item answers, concurrent duplicate submissions, reassignment of completed and partially delivered issuances, a batch with a closed issuance, and a report racing a reassignment five times in a row.
+
+## Sample data and what is missing
+
+- Every issuance, courier and customer comes from `server/src/seed/seed.data.ts`. There is no SAP: the interface is not defined and none was invented. The `source` column on an issuance (`sample` today) is the only touch point.
+- QR scanning: the dialog shows the camera frame from the design and works through manual number entry. Which camera library, and what the QR encodes, are open.
+- Couriers management is a list only. Create, edit and Excel import (spec 2.7.2) have no design.
+- Reports and the KPI dashboard: placeholder page. The diagram has a question mark on the KPI definition.
+- History, analytics, PDF, SMS and email were not built. They have no screen in the design.
+- The manager's "find issuance" button only focuses the search; its behavior on that side was not defined.
+- Grouping issuances by address exists on the courier board only, not on the manager table.
+- The drag handle on courier cards is visual; route reordering is not implemented.
+
+## Open decisions
+
+Recorded here instead of being buried in the code. The architecture is not locked on any of them.
+
+1. **Partially delivered issuance.** What happens to the lines already delivered: a new task with the remaining lines only, the courier sees all lines with the delivered ones marked, or back to SAP for a new document? Until answered the issuance is frozen: assign, delete and self pickup return 409. The UI still shows the buttons and surfaces the English message as a toast.
+2. A not delivered issuance goes back to the board and the manager decides whether to reassign. No automatic retry.
+3. Self pickup ends the courier side. What SAP should hear about it is unknown.
+4. The letter before the issuance number in the design (ס', ד', כ') is stored in its own column and not interpreted. Nobody explained it.
+5. The signature is stored as a PNG in the database. The spec asks for restricted file storage with the issuance id and a timestamp.
+6. One courier per issuance. The spec's "assign to several couriers" was not designed.
+7. Production identity provider (see [Authentication](#authentication)).
+8. The style guide page in Figma says the primary color is `#0A6E8A`; every actual screen uses `#0A52BD`. The screens win until the designers say otherwise.
+9. The manager navigation sits in a drawer on landscape tablets too (under 1200px). There is room for it inline; it is a taste call.
+
+## Design references
+
+`design/` holds the PNG exports of the Figma file (courier screens, manager screens, components, references, spec pages) and the information architecture diagram. It is git ignored because of its size; ask for the folder or the Figma file. Where the exports and the original spec disagree, the exports were followed; where an export shows a design still moving (the designer notes in the manager folder), the modal version was implemented.
+
+## Code style
+
+Client: 2 spaces, double quotes, function components with inline destructured props, `t("key")` for every UI text with keys in `shared/i18n/he.ts`. Server: 2 spaces, single quotes, direct `process.env`, plain `any` payloads instead of DTO classes. Comments explain why, in lowercase English. Top level functions in a TypeScript file are separated by a `/*──...──*/` line. SCSS: 4 spaces, nesting, breakpoints only through the `bp` mixins.

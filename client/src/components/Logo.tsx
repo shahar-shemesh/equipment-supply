@@ -1,12 +1,8 @@
-//stand in for the ministry logo that sits in the header of every screen. an svg of the real one goes here once we get it
+import logoSvg from "../assets/mod-cropped.svg?raw";
+
+//the ministry logo, inlined so its paths (fill="currentColor") take the color of the header (white) or the login card
+//and the drawer (primary blue). the export came with a hardcoded navy fill, it was swapped for currentColor in the file.
+//the css in _basic.scss sets the height and keeps the ratio (59:64, close to square)
 export function Logo({ dark = false }: { dark?: boolean }) {
-  const color = dark ? "#0A52BD" : "#FFFFFF";
-  return (
-    <svg className="logo" width="32" height="32" viewBox="0 0 32 32" aria-hidden="true">
-      <path d="M6 26 L6 12 L10 8 L10 26 Z" fill={color} opacity="0.7" />
-      <path d="M13 26 L13 8 L17 4 L17 26 Z" fill={color} />
-      <path d="M20 26 L20 12 L24 8 L24 26 Z" fill={color} opacity="0.7" />
-      <path d="M4 27 H28" stroke={color} strokeWidth="2" />
-    </svg>
-  );
+  return <span className={`logo ${dark ? "logo--dark" : ""}`} aria-hidden="true" dangerouslySetInnerHTML={{ __html: logoSvg }} />;
 }

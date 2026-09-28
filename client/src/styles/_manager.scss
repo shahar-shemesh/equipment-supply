@@ -384,8 +384,11 @@
         align-items: start;
     }
 
+    // stretch on purpose: the tablet grid above sets align-items: start, and in a flex column that same value would
+    // shrink every widget to its content width (a collapsed one to the header button alone)
     @include bp.wide {
         display: flex;
+        align-items: stretch;
         position: sticky;
         top: 24px;
     }
