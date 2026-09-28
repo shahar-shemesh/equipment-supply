@@ -91,7 +91,8 @@ export default function ReportDetailPage() {
               <label>{item.product_name}{item.catalog_number ? ` (${item.catalog_number})` : ""}</label>
               <span>
                 {a?.delivered ? t("item_delivered") : `${t("item_not_delivered")}${a?.reason ? ` - ${t(reasonKeys[a.reason])}` : ""}`}
-                {!a?.delivered && a?.reason_details ? <span className="muted small"> {a.reason_details}</span> : null}
+                {/* the reason and the free text next to each other read as one sentence without the dash */}
+                {!a?.delivered && a?.reason_details ? <span className="muted small"> - {a.reason_details}</span> : null}
               </span>
             </div>
           );

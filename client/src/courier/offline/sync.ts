@@ -171,6 +171,10 @@ export async function startSync(s: string, d: SyncDeps = {}): Promise<void> {
   if (gen !== generation) return;
   await requeueIfSameAccount(s);
   if (gen !== generation) return;
+  //a start is a login or an app open, both worth one real request: a row parked by a network error keeps its backoff
+  //(up to 15 minutes) across a re login otherwise, and the courier who just signed in again waits for nothing
+  await clearNetworkBackoff(s);
+  if (gen !== generation) return;
   await refreshCounts(s);
   if (gen !== generation) return;
   await runPass();

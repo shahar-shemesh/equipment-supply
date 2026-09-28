@@ -142,6 +142,20 @@ describe("sync worker", () => {
     expect(getSyncStatus().reachable).toBe(true);
   });
 
+  it("a start (app open or re login) drops a network backoff and sends at once", async () => {
+    const { reports } = await seed([1]);
+    const { post, transport } = fakeTransport([new Error("Network Error")]);
+    await startSync(SCOPE, { transport, now, random: () => 0 });
+    expect((await getReport(SCOPE, reports[0].operation_id)).sync.next_at).toBe(new Date(T + 30_000).toISOString());
+
+    //the tablet was closed and opened again while the server was back, no online event ever fires for that
+    stopSync();
+    await startSync(SCOPE, { transport, now, random: () => 0 });
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(post.mock.calls[1][1].operation_id).toBe(reports[0].operation_id);
+    expect((await getReport(SCOPE, reports[0].operation_id)).sync.state).toBe(ReportSyncState.synced);
+  });
+
   it("a 5xx keeps its backoff through an online event, jitter is bounded, the cap is 15 minutes", async () => {
     const { reports } = await seed([1]);
     const { post, transport } = fakeTransport([503]);

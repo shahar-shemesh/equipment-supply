@@ -103,7 +103,7 @@ export function SyncStatusBar() {
         {/* the notices take a line of their own so the chips above stay on one */}
         {!isSecureContext() && <div className="sync-bar__notice">{t("offline_insecure_context")}</div>}
         {others.map((o) => (
-          <div key={o.scope} className="sync-bar__notice">{t("sync_other_account", { count: o.count, name: o.display_name || o.username })}</div>
+          <div key={o.scope} className="sync-bar__notice">{t(o.count === 1 ? "sync_other_account_one" : "sync_other_account", { count: o.count, name: o.display_name || o.username })}</div>
         ))}
       </div>
 

@@ -69,7 +69,7 @@ export default function LoginPage() {
 
         {!online && <Alert severity="warning">{t("login_offline")}</Alert>}
         {pendingWork.map((w) => (
-          <Alert key={w.scope} severity="info">{t("login_pending_work", { count: w.count, name: w.display_name || w.username })}</Alert>
+          <Alert key={w.scope} severity="info">{t(w.count === 1 ? "login_pending_work_one" : "login_pending_work", { count: w.count, name: w.display_name || w.username })}</Alert>
         ))}
 
         {/* phone keyboards capitalize the first letter and autocorrect by default, the server matches the username as typed */}
