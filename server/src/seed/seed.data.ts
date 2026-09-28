@@ -11,12 +11,13 @@ export const users = [
   { username: 'courier3', display_name: 'מירי אבני', role: UserRole.courier, courier: 'מירי אבני' },
 ];
 
+//id numbers are the ones printed on the ניהול שליחים screen, they do not pass the check digit (see courier.validation.ts)
 export const couriers = [
-  { name: 'יוסי אברהם', employee_id: 'E-1001', phone: '052-1111111', zones: ['תל אביב', 'רמת גן'] },
-  { name: 'יעקב מזרחי', employee_id: 'E-1002', phone: '052-2222222', zones: ['פתח תקווה', 'ראש העין'] },
-  { name: 'מירי אבני', employee_id: 'E-1003', phone: '052-3333333', zones: ['חולון', 'בת ים'] },
-  { name: 'אמנון שילוח בע"מ', employee_id: 'E-2001', phone: '03-5555555', zones: ['ירושלים'] }, //external company, no login
-  { name: 'דרום קווים', employee_id: 'E-2002', phone: '08-6666666', zones: ['באר שבע'] }, //external company, no login
+  { name: 'יוסי אברהם', employee_id: 'E-1001', id_number: '300789909', phone: '052-1111111', zones: ['תל אביב', 'רמת גן'] },
+  { name: 'יעקב מזרחי', employee_id: 'E-1002', id_number: '301289087', phone: '052-2222222', zones: ['פתח תקווה', 'ראש העין'] },
+  { name: 'מירי אבני', employee_id: 'E-1003', id_number: '400789909', phone: '052-3333333', zones: ['חולון', 'בת ים'] },
+  { name: 'אמנון שילוח בע"מ', employee_id: 'E-2001', id_number: '405980076', phone: '03-5555555', zones: ['ירושלים'] }, //external company, no login. ח.פ in the id column
+  { name: 'דרום קווים', employee_id: 'E-2002', id_number: '301227367', phone: '08-6666666', zones: ['באר שבע'] }, //external company, no login
 ];
 
 const customers = [

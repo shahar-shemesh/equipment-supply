@@ -216,6 +216,7 @@ a {
 }
 
 .confirm-dialog {
+    position: relative;
     text-align: center;
     padding: 40px 24px !important;
 
@@ -224,6 +225,14 @@ a {
         display: flex;
         flex-direction: column;
         justify-content: center;
+    }
+
+    // the X in the top corner (the couriers delete confirm has one in the design, the issuance one does not).
+    // two classes on purpose, see .issuance-card__menu in _manager.scss
+    &__close.MuiIconButton-root {
+        position: absolute;
+        top: 8px;
+        inset-inline-end: 8px;
     }
 
     p {

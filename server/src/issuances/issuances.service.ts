@@ -192,12 +192,16 @@ export class IssuancesService {
     if (!ids.length) throw new BadRequestException('no issuances selected');
     if (scheduledDate && !isIsoDate(scheduledDate)) throw new BadRequestException('scheduled_date must be yyyy-mm-dd');
 
-    const courier = await this.couriers.findOne({ where: { id: courierId, active: true } });
-    if (!courier) throw new NotFoundException(`courier ${courierId} not found`);
-
     const sorted = [...new Set(ids)].sort((a, b) => a - b);
+    let courier: Courier;
 
     await this.issuances.manager.transaction(async (em) => {
+      //FOR SHARE on the courier row, inside the transaction: a delete of this courier (couriers.service.remove, FOR UPDATE)
+      //either waits for us and then sees the new open tasks, or we wait for it and find the courier gone. the courier is
+      //locked before the issuances so this and remove() never hold each other's rows
+      courier = await em.getRepository(Courier).createQueryBuilder('c').setLock('pessimistic_read').where('c.id = :id AND c.active = true', { id: courierId }).getOne();
+      if (!courier) throw new NotFoundException(`courier ${courierId} not found`);
+
       for (const id of sorted) {
         const issuance = await lockIssuance(em, id);
         if (!issuance) throw new NotFoundException(`issuance ${id} not found`);

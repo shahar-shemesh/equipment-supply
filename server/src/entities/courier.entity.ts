@@ -15,6 +15,9 @@ export class Courier {
   @Column({ nullable: true })
   employee_id: string;
 
+  @Column({ nullable: true, unique: true })
+  id_number: string; //תעודת זהות, 9 digits. unique so the same person is not added twice (couriers.service brings a deleted one back instead)
+
   @Column({ nullable: true })
   phone: string;
 
@@ -25,7 +28,7 @@ export class Courier {
   zones: string[]; //cities the courier usually covers, free text for now
 
   @Column({ default: true })
-  active: boolean;
+  active: boolean; //false = deleted on the management screen. the row stays because delivery_tasks point at it
 
   @Column({ nullable: true })
   user_id: number; //users.id of the login account, null until the courier gets one

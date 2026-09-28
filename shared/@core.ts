@@ -63,12 +63,20 @@ export interface ICourier {
   id: number;
   name: string;
   employee_id?: string;
+  id_number?: string; //תעודת זהות, 9 digits, the column next to the phone on the ניהול שליחים table
   phone?: string;
   email?: string;
   zones?: string[];
   active: boolean;
   user_id?: number;
   pending?: number; //open tasks, filled by /api/couriers
+}
+
+// the add / edit courier form. POST /api/couriers and PATCH /api/couriers/:id take exactly this
+export interface ICourierPayload {
+  name: string;
+  id_number: string;
+  phone: string;
 }
 
 export interface IIssuanceItem {

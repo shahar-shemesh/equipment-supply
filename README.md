@@ -13,13 +13,13 @@ The UI is Hebrew and right to left. The Figma exports the screens follow live un
 
 What runs today:
 
-- Manager board with search, filters, paging, bulk assign and mark urgent, the issuance detail dialog (priority, delivery date, self pickup, delete with a reason), couriers list, reports placeholder.
+- Manager board with search, filters, paging, bulk assign and mark urgent, the issuance detail dialog (priority, delivery date, self pickup, delete with a reason), courier management (add, edit, delete), reports placeholder.
 - Courier board with tabs and search, grouped cards for the same address, the delivery report (per item delivered / not delivered with a reason, recipient, signature), lookup by issuance number.
 - NestJS API with role based access, server side validation of the delivery report, status transition rules, row locking for concurrent requests.
-- PostgreSQL schema, a seed with 30 sample issuances, 34 tests.
+- PostgreSQL schema, a seed with 30 sample issuances, 46 tests.
 - Responsive layout for phone, tablet and desktop.
 
-What does not exist: the SAP interface, QR camera scanning, history and analytics screens, PDF / SMS / email confirmations, courier management beyond a list, database migrations, production authentication. Details under [Sample data and what is missing](#sample-data-and-what-is-missing).
+What does not exist: the SAP interface, QR camera scanning, history and analytics screens, PDF / SMS / email confirmations, the courier Excel import, database migrations, production authentication. Details under [Sample data and what is missing](#sample-data-and-what-is-missing).
 
 ## Stack
 
@@ -36,7 +36,7 @@ What does not exist: the SAP interface, QR camera scanning, history and analytic
 client/src
   components/      Logo, StatusBadge
   courier/         CourierLayout, pages (DeliveryBoard, TaskDetailPage), components (TaskCard, ItemReportCard, SignaturePad, FindIssuanceDialog)
-  manager/         ManagerLayout, pages (IssuancesBoard, CouriersPage, ReportsPage), components (IssuancesTable, IssuanceCard, BoardFilters, SideWidgets, AssignCourierDialog, IssuanceDetailDialog)
+  manager/         ManagerLayout, pages (IssuancesBoard, CouriersPage, ReportsPage), components (IssuancesTable, IssuanceCard, BoardFilters, SideWidgets, AssignCourierDialog, IssuanceDetailDialog, CourierDialog)
   pages/           LoginPage
   routers/         AppRouter (two route trees: /manager and /courier)
   styles/          _breakpoints, _basic, _layouts, _layout-manager, _layout-courier, _manager, _courier, _badges, _login
@@ -46,7 +46,7 @@ client/src
 server/src
   auth/            dev-local login, jwt guard, roles
   issuances/       manager side: board queries, assign, update, delete, transition rules
-  couriers/        couriers with their open task count
+  couriers/        courier management: list with open task count, add, edit, soft delete, form validation
   delivery/        courier side: my tasks, delivery report, payload validation
   entities/        TypeORM entities
   seed/            sample data
@@ -152,6 +152,8 @@ All routes are under `/api` and need `Authorization: Bearer <token>` except logi
 | `POST /issuances/assign`, `POST /issuances/mark-urgent` | manager | bulk actions |
 | `DELETE /issuances/:id` | manager | soft delete with a reason |
 | `GET /couriers` | manager | couriers with their open task count |
+| `POST /couriers`, `PATCH /couriers/:id` | manager | add / edit (name, id number, phone); a deleted courier with the same id number comes back on add |
+| `DELETE /couriers/:id`, `POST /couriers/remove` | manager | soft delete (`active=false`), 409 with the names when one of them has open deliveries |
 | `GET /delivery/tasks`, `GET /delivery/tasks/:id` | courier | my tasks (`?tab=all|pending|done&search=`) |
 | `POST /delivery/tasks/:id/attempts` | courier | the delivery report |
 | `GET /delivery/lookup?number=` | courier | find my task by the printed number |
@@ -184,7 +186,7 @@ cd server && npm test
 
 - Every issuance, courier and customer comes from `server/src/seed/seed.data.ts`. There is no SAP: the interface is not defined and none was invented. The `source` column on an issuance (`sample` today) is the only touch point.
 - QR scanning: the dialog shows the camera frame from the design and works through manual number entry. Which camera library, and what the QR encodes, are open.
-- Couriers management is a list only. Create, edit and Excel import (spec 2.7.2) have no design.
+- Couriers: add, edit and delete follow the `ניהול שליחים` screens. The Excel import (spec 2.7.2) has no design. Delete is a soft `active=false` (the delivery tasks point at the row) and is refused while the courier has open deliveries.
 - Reports and the KPI dashboard: placeholder page. The diagram has a question mark on the KPI definition.
 - History, analytics, PDF, SMS and email were not built. They have no screen in the design.
 - The manager's "find issuance" button only focuses the search; its behavior on that side was not defined.
@@ -204,6 +206,9 @@ Recorded here instead of being buried in the code. The architecture is not locke
 7. Production identity provider (see [Authentication](#authentication)).
 8. The style guide page in Figma says the primary color is `#0A6E8A`; every actual screen uses `#0A52BD`. The screens win until the designers say otherwise.
 9. The manager navigation sits in a drawer on landscape tablets too (under 1200px). There is room for it inline; it is a taste call.
+10. The courier's id number is checked for 9 digits only, not for the check digit: the sample ids on the design screens fail it. Two couriers cannot share an id number.
+11. Deleting a courier does not touch their login account (`users`); a deleted courier who signs in sees an empty board. What should happen to the account waits for the identity provider decision.
+12. The `ניהול שליחים` screens show a white header with `היסטוריה` and `הגדרות` in the navigation and dark navy buttons. The gradient header, the `דוחות` link and the blue buttons of the earlier screens were kept until the designers say the new header is the direction.
 
 ## Design references
 

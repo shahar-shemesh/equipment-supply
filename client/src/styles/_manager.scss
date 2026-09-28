@@ -747,3 +747,204 @@
         align-items: center;
     }
 }
+
+// לוח ניהול שליחים (CouriersPage.tsx). the title row and the "updated at" line are the board's, the search sits in
+// its own white box above the table like the design
+.couriers-page {
+    &__title-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 16px;
+        margin-bottom: 24px;
+
+        @include bp.phone {
+            flex-direction: column;
+            align-items: stretch;
+            margin-bottom: 16px;
+        }
+    }
+
+    &__add {
+        @include bp.phone {
+            width: 100%;
+        }
+    }
+
+    &__updated {
+        color: var(--color-text-secondary);
+        margin-top: 4px;
+    }
+
+    &__search {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 16px;
+
+        .MuiOutlinedInput-root {
+            border-radius: 999px;
+        }
+
+        @include bp.phone {
+            padding: 12px;
+        }
+    }
+}
+
+// the board's table skin (.issuances-table) with the courier columns. the two icon buttons sit in the last cell
+.couriers-table {
+    .col-actions {
+        width: 100px;
+        padding: 4px 8px;
+        white-space: nowrap;
+    }
+
+    // on a phone every row is a card: checkbox + name on the first line, phone and id under it with their titles
+    // (data-label), the two icons on the last line. same idea as .table--stack-phone, the two cells without a
+    // title are laid out by hand
+    @include bp.phone {
+        background: none;
+        border: none;
+        border-radius: 0;
+        overflow: visible;
+
+        table,
+        tbody {
+            display: block;
+        }
+
+        thead {
+            display: none;
+        }
+
+        tr {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: 12px;
+            padding: 4px 12px 8px;
+            margin-bottom: 12px;
+            // the touch block above gives real table rows a 48px height, a card grows with its cells
+            height: auto;
+
+            &.is-selected {
+                background: var(--color-primary-lighter);
+                border-color: var(--color-primary);
+            }
+        }
+
+        td {
+            border-bottom: none;
+            white-space: normal;
+            padding: 6px 0;
+        }
+
+        .col-check {
+            width: auto;
+            padding: 0;
+            // pulls the box out so it sits where the text starts, like the issuance cards
+            margin-inline-start: -8px;
+        }
+
+        .col-name {
+            flex: 1;
+            font-weight: 600;
+            font-size: 16px;
+            overflow-wrap: anywhere;
+        }
+
+        td[data-label] {
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            border-top: 1px solid var(--color-surface-2);
+
+            &::before {
+                content: attr(data-label);
+                color: var(--color-text-secondary);
+            }
+        }
+
+        .col-actions {
+            width: 100%;
+            display: flex;
+            justify-content: flex-end;
+            gap: 4px;
+            padding: 4px 0 0;
+            border-top: 1px solid var(--color-surface-2);
+        }
+
+        .issuances-table__empty {
+            display: block;
+            width: 100%;
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: 12px;
+        }
+    }
+}
+
+// the add / edit courier dialog (CourierDialog.tsx): the X in the top corner, a centered title over a line,
+// three labelled fields, one button. the same box turns into the "השליח נשמר בהצלחה" screen after an add
+.courier-dialog {
+    .MuiDialogContent-root {
+        position: relative;
+        padding: 24px 28px 28px;
+
+        @include bp.phone {
+            // a full page under 600 (RtlTheme.tsx), room for the X above the title
+            padding: 56px 16px 16px;
+        }
+    }
+
+    // two classes on purpose, see .issuance-card__menu
+    &__close.MuiIconButton-root {
+        position: absolute;
+        top: 12px;
+        inset-inline-end: 12px;
+    }
+
+    &__title {
+        text-align: center;
+        padding: 24px 0 16px;
+        margin-bottom: 8px;
+        border-bottom: 1px solid var(--color-border);
+    }
+
+    &__form {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    &__field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+
+        label {
+            font-weight: 500;
+        }
+    }
+
+    &__submit {
+        align-self: center;
+        min-width: 140px;
+        margin-top: 8px;
+
+        @include bp.phone {
+            align-self: stretch;
+        }
+    }
+
+    // the design draws the check as a thin dark ring, not the green disc of the other success screens
+    &__saved .success-dialog__icon {
+        color: var(--color-text);
+        font-size: 56px !important;
+    }
+}
