@@ -1,0 +1,141 @@
+@use "./breakpoints" as bp;
+
+// manager: full width page, top navigation. below the desktop width (1200) the nav moves into a drawer (ManagerLayout.tsx)
+.app-header--manager {
+    .app-header__nav {
+        display: flex;
+        gap: 32px;
+
+        a {
+            color: white;
+            text-decoration: none;
+            opacity: 0.85;
+            white-space: nowrap;
+
+            &.active {
+                opacity: 1;
+                font-weight: 600;
+            }
+        }
+    }
+
+    .app-header__user {
+        display: flex;
+        align-items: center;
+        gap: 24px;
+    }
+
+    // the hamburger sits on the end side (left in rtl), the brand keeps the start side like on desktop
+    .app-header__menu-btn {
+        color: white;
+        // pulls the icon out to the header edge so it lines up with the page gutter
+        margin-inline-end: -8px;
+    }
+}
+
+// the phone / tablet menu: brand on top, the three links, the user and logout at the bottom
+.manager-drawer {
+    .MuiDrawer-paper {
+        width: 300px;
+        max-width: 85vw;
+        display: flex;
+        flex-direction: column;
+    }
+
+    &__head {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-weight: 600;
+        font-size: 18px;
+        // start side lines the logo up with the links below (20 + their 4px strip), end side keeps the X near the edge
+        padding-block: 8px;
+        padding-inline: 20px 12px;
+        min-height: var(--header-height);
+        border-bottom: 1px solid var(--color-border);
+
+        span {
+            flex: 1;
+        }
+    }
+
+    &__nav {
+        display: flex;
+        flex-direction: column;
+        padding: 8px 0;
+
+        a {
+            color: var(--color-text);
+            text-decoration: none;
+            padding: 0 20px;
+            min-height: 48px;
+            display: flex;
+            align-items: center;
+            font-size: 16px;
+            // the active page gets the light blue strip, same idea as the bold link in the desktop header
+            border-inline-start: 4px solid transparent;
+
+            &.active {
+                color: var(--color-primary);
+                background: var(--color-primary-lighter);
+                border-inline-start-color: var(--color-primary);
+                font-weight: 600;
+            }
+        }
+    }
+
+    &__user {
+        margin-top: auto;
+        padding: 16px 20px calc(16px + var(--safe-bottom));
+        border-top: 1px solid var(--color-border);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        color: var(--color-text-secondary);
+    }
+
+    &__logout {
+        background: none;
+        border: none;
+        color: var(--color-primary);
+        cursor: pointer;
+        font: inherit;
+        font-weight: 500;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-height: var(--touch-target);
+        padding: 0;
+        align-self: flex-start;
+    }
+}
+
+.manager-shell {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.manager-content {
+    flex: 1;
+    padding: 24px var(--gutter) 120px;
+    min-width: 0;
+
+    @include bp.phone {
+        padding-top: 16px;
+        // the bulk action bar is two lines tall on a phone (count + wrapped buttons), the last card must clear it
+        padding-bottom: calc(150px + var(--safe-bottom));
+    }
+}
+
+.simple-page {
+    max-width: 1000px;
+
+    h1 {
+        margin-bottom: 16px;
+    }
+
+    .MuiAlert-root {
+        margin-bottom: 16px;
+    }
+}

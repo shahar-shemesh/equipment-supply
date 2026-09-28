@@ -59,7 +59,7 @@ export function FindIssuanceDialog({ open, onClose }: { open: boolean; onClose: 
 
         {manual && (
           <form onSubmit={find} className="find-dialog__form">
-            <TextField label={t("find_number_label")} value={number} onChange={(e) => setNumber(e.target.value)} autoFocus fullWidth inputProps={{ inputMode: "numeric" }} />
+            <TextField label={t("find_number_label")} value={number} onChange={(e) => setNumber(e.target.value)} autoFocus fullWidth inputProps={{ inputMode: "numeric", enterKeyHint: "go" }} />
             {error && <Alert severity="error">{error}</Alert>}
             <Button type="submit" variant="contained" disabled={!number} fullWidth>{t("find_button")}</Button>
           </form>

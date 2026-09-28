@@ -1,0 +1,68 @@
+@use "./breakpoints" as bp;
+
+// courier: narrow rounded content on the blue, a fixed bar at the bottom. the tablet is the main device, the phone works too
+.courier-shell {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--color-primary);
+}
+
+// only the logo and the logout up there. neither may shrink, so at 360 they still sit side by side on one line
+.app-header--courier {
+    .logo {
+        flex-shrink: 0;
+    }
+
+    .app-header__logout {
+        white-space: nowrap;
+    }
+}
+
+.courier-content {
+    flex: 1;
+    background: var(--color-surface);
+    border-radius: 16px 16px 0 0;
+    padding: 20px var(--gutter) calc(var(--footer-height) + var(--safe-bottom) + 24px);
+    max-width: 820px;
+    width: 100%;
+    margin: 0 auto;
+    min-width: 0;
+
+    @include bp.desktop {
+        max-width: 960px;
+    }
+
+    @include bp.phone {
+        padding-top: 16px;
+    }
+}
+
+.courier-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: calc(var(--footer-height) + var(--safe-bottom));
+    padding: 0 var(--gutter) var(--safe-bottom);
+    background: var(--header-gradient);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    z-index: 5;
+
+    .logo {
+        flex-shrink: 0;
+    }
+
+    a {
+        color: white;
+        text-decoration: none;
+        font-weight: 600;
+        min-height: var(--touch-target);
+        display: inline-flex;
+        align-items: center;
+        padding: 0 4px;
+    }
+}

@@ -8,7 +8,8 @@ import rtlPlugin from "stylis-plugin-rtl";
 const cacheRtl = createCache({ key: "muirtl", stylisPlugins: [prefixer, rtlPlugin] });
 
 //colors from the actual screens in design/ (blue #0A52BD). the style-guide page says #0A6E8A but no screen uses it,
-//so until the designers answer which one wins, the screens win
+//so until the designers answer which one wins, the screens win.
+//breakpoints stay at the mui defaults (sm 600, md 900, lg 1200), styles/_breakpoints.scss uses the same numbers
 const theme = createTheme({
   direction: "rtl",
   typography: { fontFamily: "Rubik, Arial, sans-serif" },
@@ -24,6 +25,37 @@ const theme = createTheme({
     MuiButton: { styleOverrides: { root: { textTransform: "none", fontWeight: 500, boxShadow: "none" } } },
     MuiTextField: { defaultProps: { size: "small" } },
     MuiSelect: { defaultProps: { size: "small" } },
+    //every dialog becomes a full screen page on a phone, without touching each <Dialog>. the nested confirm dialogs too
+    MuiDialog: {
+      styleOverrides: {
+        paper: ({ theme }) => ({
+          [theme.breakpoints.down("sm")]: {
+            margin: 0,
+            width: "100%",
+            maxWidth: "100%",
+            height: "100%",
+            maxHeight: "100%",
+            borderRadius: 0,
+          },
+        }),
+      },
+    },
+    //the full screen paper runs under the iphone home bar (viewport-fit=cover in index.html), so whatever sits last in
+    //the dialog gets the safe area added to its bottom padding
+    MuiDialogContent: {
+      styleOverrides: {
+        root: ({ theme }) => ({
+          [theme.breakpoints.down("sm")]: { padding: 16, "&:last-child": { paddingBottom: "calc(16px + env(safe-area-inset-bottom, 0px))" } },
+        }),
+      },
+    },
+    MuiDialogActions: {
+      styleOverrides: {
+        root: ({ theme }) => ({
+          [theme.breakpoints.down("sm")]: { padding: 16, paddingBottom: "calc(16px + env(safe-area-inset-bottom, 0px))", flexWrap: "wrap", gap: 8 },
+        }),
+      },
+    },
   },
 });
 

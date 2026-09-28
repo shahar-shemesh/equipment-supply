@@ -1,11 +1,13 @@
+// the gradient bar on top of every screen. the manager and courier variants live in _layout-manager / _layout-courier
 .app-header {
     background: var(--header-gradient);
     color: white;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 24px;
-    height: 64px;
+    padding: 0 var(--gutter);
+    height: var(--header-height);
+    gap: 16px;
 
     &__brand {
         display: flex;
@@ -13,28 +15,7 @@
         gap: 12px;
         font-weight: 600;
         font-size: 18px;
-    }
-
-    &__nav {
-        display: flex;
-        gap: 32px;
-
-        a {
-            color: white;
-            text-decoration: none;
-            opacity: 0.85;
-
-            &.active {
-                opacity: 1;
-                font-weight: 600;
-            }
-        }
-    }
-
-    &__user {
-        display: flex;
-        align-items: center;
-        gap: 24px;
+        white-space: nowrap;
     }
 
     &__logout {
@@ -46,71 +27,7 @@
         display: inline-flex;
         align-items: center;
         gap: 6px;
-    }
-
-    &--courier {
-        height: 56px;
-        padding: 0 16px;
-    }
-}
-
-// manager: full width desktop page
-.manager-shell {
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-}
-
-.manager-content {
-    flex: 1;
-    padding: 24px 32px 120px;
-}
-
-.simple-page {
-    max-width: 1000px;
-
-    h1 {
-        margin-bottom: 16px;
-    }
-
-    .MuiAlert-root {
-        margin-bottom: 16px;
-    }
-}
-
-// courier: narrow, rounded content on the blue, fixed bar at the bottom
-.courier-shell {
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    background: var(--color-primary);
-}
-
-.courier-content {
-    flex: 1;
-    background: var(--color-surface);
-    border-radius: 16px 16px 0 0;
-    padding: 20px 16px 100px;
-    max-width: 820px;
-    width: 100%;
-    margin: 0 auto;
-}
-
-.courier-footer {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 64px;
-    background: var(--header-gradient);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 16px;
-
-    a {
-        color: white;
-        text-decoration: none;
-        font-weight: 600;
+        min-height: var(--touch-target);
+        padding: 0 4px;
     }
 }

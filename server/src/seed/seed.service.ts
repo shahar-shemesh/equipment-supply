@@ -6,6 +6,7 @@ import * as bcrypt from 'bcryptjs';
 import { AttemptOutcome, IssuanceStatus, NonDeliveryReason, RecipientType, TaskStatus } from '../../../shared/@core';
 import { User, Courier, Issuance, DeliveryTask, DeliveryAttempt } from '../entities';
 import { DEV_PASSWORD } from '../auth/auth.constants';
+import { destructiveSeedAllowed } from '../env';
 import { buildIssuances, couriers, users, SAMPLE_SIGNATURE } from './seed.data';
 
 @Injectable()
@@ -21,8 +22,10 @@ export class SeedService {
     @InjectRepository(DeliveryAttempt) private attemptRepo: Repository<DeliveryAttempt>,
   ) {}
 
-  //wipes everything and inserts the sample set. npm run seed
+  //wipes everything and inserts the sample set. npm run seed.
+  //seed.ts checks the same flag before booting, this one is for anyone who injects the service from somewhere else
   async run() {
+    if (!destructiveSeedAllowed()) throw new Error('refusing to seed: needs ENVIRONMENT=LOCAL and ALLOW_DESTRUCTIVE_SEED=true');
     this.logger.log('===== seeding, all existing rows are dropped =====');
     await this.dataSource.query('TRUNCATE TABLE delivery_attempt_items, delivery_attempts, delivery_tasks, issuance_items, issuances, couriers, users RESTART IDENTITY CASCADE');
 

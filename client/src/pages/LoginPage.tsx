@@ -51,8 +51,9 @@ export default function LoginPage() {
         </div>
         <h1>{t("login_title")}</h1>
 
-        <TextField label={t("login_username")} value={username} onChange={(e) => setUsername(e.target.value)} autoFocus fullWidth />
-        <TextField label={t("login_password")} type="password" value={password} onChange={(e) => setPassword(e.target.value)} fullWidth />
+        {/* phone keyboards capitalize the first letter and autocorrect by default, the server matches the username as typed */}
+        <TextField label={t("login_username")} value={username} onChange={(e) => setUsername(e.target.value)} autoFocus fullWidth autoComplete="username" inputProps={{ autoCapitalize: "none", autoCorrect: "off", spellCheck: false }} />
+        <TextField label={t("login_password")} type="password" value={password} onChange={(e) => setPassword(e.target.value)} fullWidth autoComplete="current-password" />
 
         {error && <Alert severity="error">{error}</Alert>}
 

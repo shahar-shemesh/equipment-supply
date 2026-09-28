@@ -1,11 +1,23 @@
+@use "./breakpoints" as bp;
+
 .board {
     display: grid;
-    grid-template-columns: 1fr 440px;
+    grid-template-columns: 1fr;
     gap: 32px;
     align-items: start;
 
-    @media (max-width: 1280px) {
-        grid-template-columns: 1fr;
+    // the two columns of the design need the room: under 1440 the nine column table would scroll inside a 700-870px box
+    // on every common laptop, so up to there the widgets go under the table
+    @include bp.wide {
+        grid-template-columns: 1fr 400px;
+    }
+
+    @include bp.tablet {
+        gap: 24px;
+    }
+
+    @include bp.phone {
+        gap: 16px;
     }
 
     &__main {
@@ -16,7 +28,21 @@
         display: flex;
         justify-content: space-between;
         align-items: flex-start;
+        gap: 16px;
         margin-bottom: 24px;
+
+        // the button drops under the title and takes the full width, there is no room next to it
+        @include bp.phone {
+            flex-direction: column;
+            align-items: stretch;
+            margin-bottom: 16px;
+        }
+    }
+
+    &__find {
+        @include bp.phone {
+            width: 100%;
+        }
     }
 
     &__updated {
@@ -30,6 +56,12 @@
         gap: 8px;
         color: var(--color-text-secondary);
         margin: 16px 0 8px;
+        flex-wrap: wrap;
+
+        @include bp.phone {
+            font-size: 14px;
+            margin-top: 12px;
+        }
     }
 
     &__page-btn {
@@ -54,12 +86,23 @@
         right: 0;
         background: var(--color-surface);
         border-top: 1px solid var(--color-border);
-        padding: 16px 32px;
+        padding: 16px var(--gutter) calc(16px + var(--safe-bottom));
         display: flex;
         align-items: center;
         gap: 16px;
+        flex-wrap: wrap;
         box-shadow: 0 -4px 16px rgba(26, 43, 61, 0.08);
         z-index: 5;
+
+        @include bp.phone {
+            padding: 12px var(--gutter) calc(12px + var(--safe-bottom));
+            gap: 8px;
+
+            // the count takes the first line by itself, the three buttons share the next one and wrap when they must
+            strong {
+                width: 100%;
+            }
+        }
     }
 }
 
@@ -73,14 +116,34 @@
         background: var(--color-surface);
     }
 
+    // as many fields per row as fit on desktop, a fixed count below it so the cells line up between rows
     &__row {
-        display: flex;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
         gap: 12px;
-        flex-wrap: wrap;
+
+        @include bp.tablet {
+            grid-template-columns: repeat(3, 1fr);
+        }
+
+        @include bp.phone {
+            grid-template-columns: repeat(2, 1fr);
+        }
 
         .MuiTextField-root {
-            min-width: 170px;
+            min-width: 0;
+            width: 100%;
             background: var(--color-surface);
+        }
+    }
+
+    &__clear {
+        // a text button stretched to the cell looks like a field, keep it at its own width
+        justify-self: start;
+
+        @include bp.phone {
+            grid-column: 1 / -1;
+            justify-self: stretch;
         }
     }
 }
@@ -102,10 +165,16 @@
 
     th,
     td {
-        text-align: right;
+        text-align: start;
         padding: 12px 16px;
         border-bottom: 1px solid var(--color-surface-2);
         white-space: nowrap;
+
+        // tighter cells so the nine columns fit a 768 portrait. overflow: auto above is the fallback when they do not
+        @include bp.tablet {
+            padding: 10px;
+            font-size: 14px;
+        }
     }
 
     th {
@@ -124,6 +193,14 @@
         padding: 4px 8px;
     }
 
+    // the free text cells (customer, destination) give way first when the table is squeezed. when there is room
+    // the browser keeps them on one line, so the wide desktop looks the same as before
+    .col-wrap {
+        white-space: normal;
+        min-width: 110px;
+        overflow-wrap: anywhere;
+    }
+
     &__number {
         font-weight: 500;
         text-decoration: none;
@@ -136,8 +213,161 @@
     }
 }
 
+// a plain table that turns into a list of cards on a phone (CouriersPage.tsx): the row is the card and every cell
+// prints its column title from data-label before the value
+.issuances-table.table--stack-phone {
+    @include bp.phone {
+        background: none;
+        border: none;
+        border-radius: 0;
+        overflow: visible;
+
+        table,
+        tbody,
+        tr {
+            display: block;
+        }
+
+        thead {
+            display: none;
+        }
+
+        tr {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: 12px;
+            padding: 6px 16px;
+            margin-bottom: 12px;
+            // the touch block below gives real table rows a 48px height, a block card must grow with its cells
+            height: auto;
+        }
+
+        td {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            gap: 12px;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--color-surface-2);
+            white-space: normal;
+            text-align: end;
+            overflow-wrap: anywhere;
+
+            &::before {
+                content: attr(data-label);
+                color: var(--color-text-secondary);
+                flex-shrink: 0;
+                text-align: start;
+            }
+
+            &:last-child {
+                border-bottom: none;
+            }
+        }
+    }
+}
+
 .menu-item--danger {
     color: var(--color-danger) !important;
+}
+
+// the phone version of the board table, one card per row (IssuanceCard.tsx)
+.issuance-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+
+    &--loading {
+        opacity: 0.6;
+    }
+
+    &__select-all {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        color: var(--color-text-secondary);
+        font-size: 14px;
+        cursor: pointer;
+        // lines the checkbox up with the ones inside the cards below
+        padding-inline-start: 4px;
+    }
+
+    &__empty {
+        text-align: center;
+        color: var(--color-text-secondary);
+        padding: 40px 16px;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: 12px;
+    }
+}
+
+.issuance-card {
+    position: relative;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 6px 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+
+    &.is-selected {
+        background: var(--color-primary-lighter);
+        border-color: var(--color-primary);
+    }
+
+    // the kebab in the top corner on the end side (left in rtl), the first row stops before it.
+    // two classes on purpose: mui injects position: relative on the button base after this sheet, a single class
+    // loses that tie and the button ends up as a stretched flex child across the top of the card
+    &__menu.MuiIconButton-root {
+        position: absolute;
+        top: 4px;
+        inset-inline-end: 4px;
+    }
+
+    &__row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        font-size: 14px;
+
+        > span {
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+
+        label {
+            color: var(--color-text-secondary);
+            margin-inline-end: 4px;
+        }
+
+        &--head {
+            justify-content: flex-start;
+            gap: 4px;
+            font-size: 16px;
+            // the checkbox has its own padding, pull it out so the box sits where the text starts
+            margin-inline-start: -8px;
+            padding-inline-end: 40px;
+
+            .status-badge {
+                margin-inline-start: auto;
+            }
+        }
+    }
+
+    &__number {
+        font-weight: 600;
+        font-size: 16px;
+        display: inline-flex;
+        align-items: center;
+    }
+
+    &__customer {
+        font-weight: 600;
+        font-size: 15px;
+    }
 }
 
 // side widgets
@@ -145,8 +375,24 @@
     display: flex;
     flex-direction: column;
     gap: 24px;
-    position: sticky;
-    top: 24px;
+
+    // next to the table only from 1440 (same line as .board). under that the two boxes share a row below the table
+    // from 600 up, and on a phone they stack, collapsed
+    @include bp.tablet-up {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        align-items: start;
+    }
+
+    @include bp.wide {
+        display: flex;
+        position: sticky;
+        top: 24px;
+    }
+
+    @include bp.phone {
+        gap: 12px;
+    }
 }
 
 .widget {
@@ -155,11 +401,32 @@
     border: 1px solid var(--color-border);
     overflow: hidden;
 
+    // a button since SideWidgets.tsx, the whole strip opens and closes the body
     &__header {
         background: var(--color-primary);
         color: white;
+        font: inherit;
         font-weight: 600;
         padding: 12px 16px;
+        width: 100%;
+        border: none;
+        text-align: start;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        min-height: var(--touch-target);
+    }
+
+    // the chevron of the design points up while the body is open, like an accordion
+    &__chevron {
+        transform: rotate(180deg);
+        transition: transform 0.2s;
+    }
+
+    &--collapsed .widget__chevron {
+        transform: none;
     }
 
     &__body {
@@ -194,7 +461,7 @@
     &__bar {
         position: absolute;
         bottom: 4px;
-        right: 4px;
+        inset-inline-start: 4px;
         height: 4px;
         border-radius: 2px;
         background: var(--color-primary);
@@ -212,6 +479,11 @@
         border-radius: 8px;
         max-height: 360px;
         overflow: auto;
+
+        // the dialog is the whole screen on a phone (RtlTheme.tsx), half of it for the list keeps the buttons in reach
+        @include bp.phone {
+            max-height: 50vh;
+        }
 
         li {
             display: flex;
@@ -231,6 +503,14 @@
             }
         }
     }
+
+    // the theme already wraps the actions row on a phone, here the two buttons take a line each
+    @include bp.phone {
+        .MuiDialogActions-root .MuiButton-root {
+            width: 100%;
+            margin: 0;
+        }
+    }
 }
 
 // issuance detail dialog
@@ -246,6 +526,10 @@
         border-radius: 12px;
         padding: 16px 20px;
         margin-top: 16px;
+
+        @include bp.phone {
+            padding: 12px 14px;
+        }
     }
 
     &__head {
@@ -253,14 +537,28 @@
         grid-template-columns: repeat(3, 1fr);
         gap: 16px;
 
+        @include bp.tablet {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        @include bp.phone {
+            grid-template-columns: 1fr;
+            gap: 12px;
+        }
+
         .field {
             display: flex;
             flex-direction: column;
             gap: 4px;
+            min-width: 0;
 
             label {
                 color: var(--color-text-secondary);
                 font-size: 14px;
+            }
+
+            strong {
+                overflow-wrap: anywhere;
             }
         }
     }
@@ -272,6 +570,7 @@
         border-radius: 8px;
         padding: 12px 16px;
         color: var(--color-danger);
+        overflow-wrap: anywhere;
 
         svg {
             vertical-align: middle;
@@ -283,6 +582,17 @@
         align-items: flex-end;
         gap: 24px;
         flex-wrap: wrap;
+
+        // one under the other on a phone, every control the full width
+        @include bp.phone {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 12px;
+
+            .MuiButton-root {
+                width: 100%;
+            }
+        }
 
         .field {
             display: flex;
@@ -319,6 +629,7 @@
         justify-content: flex-start;
         gap: 12px;
         margin-top: 12px;
+        flex-wrap: wrap;
     }
 
     &__items .item-lines {
@@ -330,10 +641,17 @@
         > div {
             display: flex;
             justify-content: space-between;
+            gap: 12px;
             padding: 4px 0;
 
             label {
                 color: var(--color-text-secondary);
+                flex-shrink: 0;
+            }
+
+            strong {
+                text-align: end;
+                overflow-wrap: anywhere;
             }
         }
 
@@ -342,17 +660,42 @@
         }
     }
 
-    &__done {
-        text-align: center;
-        padding: 40px 0;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 16px;
+}
+
+// fingers: rows and the things inside them grow to the 44px target. the icon buttons get theirs from _basic.scss
+@include bp.touch {
+    .issuances-table {
+        tbody tr {
+            height: 48px;
+        }
+
+        // 20px box + 12px around it = the 44px target
+        .MuiCheckbox-root {
+            padding: 12px;
+        }
+
+        .col-check,
+        .col-menu {
+            padding: 0 2px;
+        }
     }
 
-    &__done-icon {
-        font-size: 72px !important;
-        color: var(--color-success);
+    .issuance-card .MuiCheckbox-root,
+    .issuance-cards__select-all .MuiCheckbox-root {
+        padding: 12px;
+    }
+
+    .issuance-card__number {
+        min-height: var(--touch-target);
+    }
+
+    .board__page-btn {
+        min-width: var(--touch-target);
+        min-height: var(--touch-target);
+    }
+
+    .assign-dialog__list li {
+        min-height: 48px;
+        align-items: center;
     }
 }

@@ -24,12 +24,13 @@ export function ItemReportCard({ item, index, answer, errors, onChange }: Props)
   return (
     <div className="item-report">
       <h3>{t("item_n", { n: index + 1 })}</h3>
+      {/* the same label / value rows as the customer block, .kv stacks them on a phone */}
       <div className="item-report__fields">
-        <div><label>{t("item_product")}</label><span>{item.product_name}</span></div>
-        <div><label>{t("item_catalog")}</label><span>{item.catalog_number || "-"}</span></div>
-        <div><label>{t("item_station")}</label><span>{item.station_number || "-"}</span></div>
-        <div><label>{t("item_serial")}</label><span>{item.serial_number || "-"}</span></div>
-        <div><label>{t("item_quantity")}</label><span>{item.quantity}</span></div>
+        <div className="kv"><label>{t("item_product")}</label><span>{item.product_name}</span></div>
+        <div className="kv"><label>{t("item_catalog")}</label><span>{item.catalog_number || "-"}</span></div>
+        <div className="kv"><label>{t("item_station")}</label><span>{item.station_number || "-"}</span></div>
+        <div className="kv"><label>{t("item_serial")}</label><span>{item.serial_number || "-"}</span></div>
+        <div className="kv"><label>{t("item_quantity")}</label><span>{item.quantity}</span></div>
       </div>
 
       <div className="item-report__question">{t("item_delivered_q")}</div>

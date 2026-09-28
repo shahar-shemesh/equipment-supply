@@ -1,0 +1,32 @@
+import { ConflictException } from '@nestjs/common';
+
+import { IssuanceStatus } from '../../../shared/@core';
+
+export type IssuanceAction = 'assign' | 'self_pickup' | 'delete' | 'edit';
+
+//which statuses each manager action may start from. anything not listed gets a 409.
+//
+//partially_delivered is in no row on purpose: nobody decided yet what happens with the lines that were already delivered.
+//a new task with the remaining lines only? the courier sees all lines with the delivered ones marked? back to SAP for a new
+//document? until that is answered a partially delivered issuance is frozen and the manager gets the 409 message.
+//delivered is closed for good, deleted too. self_pickup can still be assigned (manager changed their mind) or deleted
+const allowedFrom: Record<IssuanceAction, IssuanceStatus[]> = {
+  assign: [IssuanceStatus.unassigned, IssuanceStatus.assigned, IssuanceStatus.not_delivered, IssuanceStatus.self_pickup],
+  self_pickup: [IssuanceStatus.unassigned, IssuanceStatus.assigned, IssuanceStatus.not_delivered],
+  delete: [IssuanceStatus.unassigned, IssuanceStatus.assigned, IssuanceStatus.not_delivered, IssuanceStatus.self_pickup],
+  edit: [IssuanceStatus.unassigned, IssuanceStatus.assigned, IssuanceStatus.not_delivered, IssuanceStatus.self_pickup],
+};
+
+//priority / date / notes may change on these. mark-urgent on the board uses it to skip the closed rows
+export const editableStatuses = allowedFrom.edit;
+
+export function canDo(action: IssuanceAction, status: IssuanceStatus) {
+  return allowedFrom[action].includes(status);
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+export function assertCanDo(action: IssuanceAction, issuance: { sap_number: string; status: IssuanceStatus }) {
+  if (canDo(action, issuance.status)) return;
+  throw new ConflictException(`issuance ${issuance.sap_number} is ${issuance.status}, ${action} is not allowed`);
+}

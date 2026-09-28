@@ -78,8 +78,8 @@ export function IssuanceDetailDialog({ id, onClose, onChanged, onAssign }: Props
         {error && <Alert severity="error">{error}</Alert>}
 
         {deleteStep === "done" && (
-          <div className="detail-dialog__done">
-            <CheckCircleIcon className="detail-dialog__done-icon" />
+          <div className="success-dialog">
+            <CheckCircleIcon className="success-dialog__icon" />
             <h2>{t("delete_done")}</h2>
             <Button variant="contained" onClick={onClose}>{t("back_to_board")}</Button>
           </div>

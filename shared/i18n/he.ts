@@ -192,4 +192,9 @@ export const he = {
     reason_invalid_address: "כתובת לא תקינה",
     reason_customer_refused: "סירוב לקוח",
     reason_other: "אחר",
+
+    // responsive (manager)
+    menu: "תפריט",
+    select_all: "בחירת הכל",
+    row_actions: "פעולות",
 };

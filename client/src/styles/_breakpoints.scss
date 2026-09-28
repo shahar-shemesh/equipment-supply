@@ -1,0 +1,61 @@
+// same numbers as the mui theme (sm 600, md 900, lg 1200) so useBreakpoint() in ts and these mixins agree on what a phone,
+// a tablet and a desktop are. tablet covers portrait and landscape (600 to 1199), the courier's main device.
+// usage:  @use "./breakpoints" as bp;   @include bp.phone { ... }
+$phone-max: 599px;
+$tablet-min: 600px;
+$compact-max: 899px;
+$tablet-max: 1199px;
+$desktop-min: 1200px;
+$wide-min: 1440px;
+
+@mixin phone {
+    @media (max-width: $phone-max) {
+        @content;
+    }
+}
+
+@mixin tablet {
+    @media (min-width: $tablet-min) and (max-width: $tablet-max) {
+        @content;
+    }
+}
+
+@mixin tablet-up {
+    @media (min-width: $tablet-min) {
+        @content;
+    }
+}
+
+// phone + portrait tablet (under 900). where a nine column table cannot fit and the rows become cards
+@mixin compact {
+    @media (max-width: $compact-max) {
+        @content;
+    }
+}
+
+// phone + tablet
+@mixin below-desktop {
+    @media (max-width: $tablet-max) {
+        @content;
+    }
+}
+
+@mixin desktop {
+    @media (min-width: $desktop-min) {
+        @content;
+    }
+}
+
+// 1440 and up: the only place the manager board has room for the table and the widgets side by side
+@mixin wide {
+    @media (min-width: $wide-min) {
+        @content;
+    }
+}
+
+// fingers, not a mouse. for the 44px minimum on things you tap, whatever the screen width
+@mixin touch {
+    @media (hover: none) and (pointer: coarse) {
+        @content;
+    }
+}

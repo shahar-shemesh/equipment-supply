@@ -1,3 +1,5 @@
+@use "./breakpoints" as bp;
+
 // colors from the screens in design/ (not from the style-guide page, see RtlTheme.tsx)
 :root {
     --color-primary: #0A52BD;
@@ -19,6 +21,28 @@
     --color-warning-bg: #FFF3DC;
     // right side dark blue, left side cyan, like the header in every screen
     --header-gradient: linear-gradient(90deg, #00C2E0 0%, #0A52BD 55%);
+
+    // responsive knobs. the page gutter shrinks with the screen, the touch target does not
+    --gutter: 32px;
+    --touch-target: 44px;
+    --header-height: 64px;
+    --footer-height: 64px;
+    // iphone home bar. 0 everywhere else
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@include bp.tablet {
+    :root {
+        --gutter: 20px;
+    }
+}
+
+@include bp.phone {
+    :root {
+        --gutter: 16px;
+        --header-height: 56px;
+        --footer-height: 56px;
+    }
 }
 
 * {
@@ -31,6 +55,17 @@ body,
     min-height: 100%;
 }
 
+// the page never scrolls sideways. anything wider than the screen (tables) scrolls inside its own box.
+// on html, not on body: html's overflow is handed to the viewport, and mobile chrome / safari stop zooming the whole
+// page out to fit the widest element. body must stay overflow visible, otherwise body itself becomes the scroll
+// container and every position: sticky in the app (courier send bar, board widgets) stops sticking.
+// clip is the same clipping without ever creating a scroll container, hidden is the fallback for older browsers
+html {
+    -webkit-text-size-adjust: 100%;
+    overflow-x: hidden;
+    overflow-x: clip;
+}
+
 body {
     margin: 0;
     font-family: Rubik, Arial, sans-serif;
@@ -39,16 +74,30 @@ body {
     direction: rtl;
 }
 
+img,
+svg,
+canvas {
+    max-width: 100%;
+}
+
 h1 {
     font-size: 28px;
     font-weight: 700;
     margin: 0;
+
+    @include bp.phone {
+        font-size: 22px;
+    }
 }
 
 h2 {
     font-size: 20px;
     font-weight: 600;
     margin: 0;
+
+    @include bp.phone {
+        font-size: 18px;
+    }
 }
 
 h3 {
@@ -103,17 +152,61 @@ a {
     padding: 60px;
 }
 
-// shared dialog bits
+// fingers: every real button, field and text link is at least 44px tall. !important because mui's emotion styles
+// land after this sheet. the theme makes every field "small" (40px), the inputs get the 4px back here
+@include bp.touch {
+    .MuiButton-root {
+        min-height: var(--touch-target) !important;
+    }
+
+    .MuiIconButton-root {
+        min-width: var(--touch-target);
+        min-height: var(--touch-target);
+    }
+
+    .MuiMenuItem-root {
+        min-height: var(--touch-target) !important;
+    }
+
+    .MuiOutlinedInput-root {
+        min-height: var(--touch-target);
+    }
+
+    // the switch row in the detail dialog
+    .MuiFormControlLabel-root {
+        min-height: var(--touch-target);
+    }
+
+    .link-button {
+        min-height: var(--touch-target);
+        display: inline-flex;
+        align-items: center;
+    }
+}
+
+// shared dialog bits. on a phone the dialog itself is full screen (RtlTheme.tsx), these only adapt the spacing
 .dialog-title-row {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
+    gap: 12px;
     margin-bottom: 16px;
+
+    h2 {
+        overflow-wrap: anywhere;
+    }
 }
 
 .confirm-dialog {
     text-align: center;
     padding: 40px 24px !important;
+
+    // a full screen page on a phone (RtlTheme.tsx): without this the two lines of text sit at the very top
+    @include bp.phone {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+    }
 
     p {
         color: var(--color-text-secondary);
@@ -124,6 +217,7 @@ a {
         justify-content: center;
         gap: 12px;
         margin-top: 24px;
+        flex-wrap: wrap;
     }
 }
 
@@ -133,6 +227,7 @@ a {
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     gap: 16px;
 
     &__icon {
@@ -141,7 +236,7 @@ a {
     }
 }
 
-// a value under a label, used all over the detail screens
+// a value under a label, used all over the detail screens. on a narrow screen the pair stacks instead of squeezing
 .kv {
     display: flex;
     justify-content: space-between;
@@ -150,10 +245,21 @@ a {
 
     label {
         color: var(--color-text-secondary);
+        flex-shrink: 0;
     }
 
     span {
         font-weight: 500;
-        text-align: left;
+        text-align: end;
+        overflow-wrap: anywhere;
+    }
+
+    @include bp.phone {
+        flex-direction: column;
+        gap: 2px;
+
+        span {
+            text-align: start;
+        }
     }
 }

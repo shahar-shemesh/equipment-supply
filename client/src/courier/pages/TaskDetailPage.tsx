@@ -33,9 +33,14 @@ export default function TaskDetailPage() {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
 
+  //everything the previous task collected goes, the signature too: the pad unmounts with the loading branch and would
+  //otherwise leave the old png in state while the new pad shows the empty hint
   useEffect(() => {
     setTask(null);
     setAnswers({});
+    setRecipientType(RecipientType.customer);
+    setRecipient({ name: "", id_number: "", phone: "" });
+    setSignature("");
     setErrors({});
     setError("");
     get(`/delivery/tasks/${id}`).then(setTask).catch((e) => setError(errorMessage(e)));
@@ -188,9 +193,12 @@ export default function TaskDetailPage() {
 
           {error && <Alert severity="error">{error}</Alert>}
 
-          <Button variant="contained" size="large" fullWidth className="task-detail__submit" disabled={busy} onClick={submit}>
-            {busy ? <CircularProgress size={20} color="inherit" /> : t("submit")}
-          </Button>
+          {/* on phone and tablet the strip sticks above the footer while the report scrolls (_courier.scss) */}
+          <div className="task-detail__submit-bar">
+            <Button variant="contained" size="large" fullWidth className="task-detail__submit" disabled={busy} onClick={submit}>
+              {busy ? <CircularProgress size={20} color="inherit" /> : t("submit")}
+            </Button>
+          </div>
         </>
       )}
 

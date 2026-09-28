@@ -6,14 +6,16 @@ import { User, Courier } from '../entities';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { AuthGuard } from './auth.guard';
+import { jwtSecret } from '../env';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([User, Courier]),
-    //registerAsync for the same reason as TypeOrmModule in app.module: process.env is filled after the imports ran
+    //registerAsync for the same reason as TypeOrmModule in app.module: process.env is filled after the imports ran.
+    //jwtSecret() throws outside LOCAL when the secret is missing or still the dev default, so the app does not start
     JwtModule.registerAsync({
       useFactory: () => ({
-        secret: process.env.JWT_SECRET || 'dev-only-secret-change-me',
+        secret: jwtSecret(),
         signOptions: { expiresIn: '12h' }, //a courier shift, roughly
       }),
     }),

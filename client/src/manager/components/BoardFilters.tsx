@@ -74,7 +74,7 @@ export function BoardFilters({ filters, cities, onChange }: { filters: any; citi
         </TextField>
 
         {dirty && (
-          <Button variant="text" onClick={() => { setSearch(""); onChange(emptyFilters); }}>
+          <Button variant="text" className="board-filters__clear" onClick={() => { setSearch(""); onChange(emptyFilters); }}>
             {t("filter_clear")}
           </Button>
         )}

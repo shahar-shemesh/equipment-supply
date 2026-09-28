@@ -112,7 +112,7 @@ export default function IssuancesBoard() {
             <div className="board__updated">{updatedAt ? t("board_updated_at", { time: formatDateTime(updatedAt) }) : t("loading")}</div>
           </div>
           {/* the QR button of the manager side has no defined behavior yet (find by number? open the camera?) so it only opens the search */}
-          <Button variant="contained" startIcon={<QrCodeScannerIcon />} onClick={() => document.getElementById("board-search")?.focus()}>
+          <Button variant="contained" className="board__find" startIcon={<QrCodeScannerIcon />} onClick={() => document.getElementById("board-search")?.focus()}>
             {t("find_issuance")}
           </Button>
         </div>

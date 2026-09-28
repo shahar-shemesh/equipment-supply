@@ -19,7 +19,8 @@ export default function CouriersPage() {
       <h1>{t("couriers_title")}</h1>
       <Alert severity="info">{t("couriers_placeholder")}</Alert>
 
-      <div className="issuances-table">
+      {/* data-label feeds the phone layout: the css turns every row into a card and prints the column title before the value */}
+      <div className="issuances-table table--stack-phone">
         <table>
           <thead>
             <tr>
@@ -34,12 +35,12 @@ export default function CouriersPage() {
           <tbody>
             {couriers.map((c) => (
               <tr key={c.id}>
-                <td>{c.name}</td>
-                <td>{c.employee_id || "-"}</td>
-                <td>{c.phone || "-"}</td>
-                <td>{(c.zones || []).join(", ") || "-"}</td>
-                <td>{c.pending || 0}</td>
-                <td>{c.user_id ? t("yes") : t("no")}</td>
+                <td data-label={t("courier_name")}>{c.name}</td>
+                <td data-label={t("courier_employee_id")}>{c.employee_id || "-"}</td>
+                <td data-label={t("courier_phone")}>{c.phone || "-"}</td>
+                <td data-label={t("courier_zones")}>{(c.zones || []).join(", ") || "-"}</td>
+                <td data-label={t("courier_open_tasks")}>{c.pending || 0}</td>
+                <td data-label={t("courier_has_login")}>{c.user_id ? t("yes") : t("no")}</td>
               </tr>
             ))}
           </tbody>

@@ -1,10 +1,12 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
-import { AttemptOutcome, RecipientType, TaskStatus } from '../../../shared/@core';
+import { IssuanceStatus, TaskStatus } from '../../../shared/@core';
 import { normalizeSapNumber } from '../../../shared/@utils';
 import { DeliveryTask, DeliveryAttempt, Issuance } from '../entities';
+import { lockIssuance } from '../issuances/issuances.service';
+import { outcomeOf, validateItemAnswers, validateRecipient, validateSignature } from './attempt.validation';
 
 //courier side: my tasks, one task, report an attempt, find a task by the printed number
 @Injectable()
@@ -74,55 +76,49 @@ export class DeliveryService {
   /*──────────────────────────────────────────────────────────────────────────*/
 
   // POST /api/delivery/tasks/:id/attempts  (IAttemptPayload)
-  //the outcome is derived from the per item answers, the ui never sends it
+  //validation first, outside the transaction, so a bad payload never touches the db. the outcome is derived from the
+  //validated answers, the body never says it.
+  //then, under the issuance lock (same order as the manager flows: issuance, then task): re-check that the task is still
+  //pending, insert the attempt, close the task with a conditional update, mirror the outcome on the issuance
   async report(user: any, id: number, body: any) {
-    const task = await this.myTask(user, id);
-    if (task.status !== TaskStatus.pending) throw new BadRequestException('task already closed');
+    const task = await this.myTask(user, id); //also proves the task belongs to this courier
+    if (task.status !== TaskStatus.pending) throw new ConflictException('task already closed');
 
-    const items = task.issuance.items;
-    const answers: any[] = Array.isArray(body?.items) ? body.items : [];
+    const answers = validateItemAnswers(task.issuance.items, body?.items);
+    const recipient = validateRecipient(body, task.issuance);
+    const signature = validateSignature(body?.signature_png);
+    const outcome = outcomeOf(answers);
 
-    //every line needs an answer and every "not delivered" needs a reason. the screen enforces the same
-    for (const item of items) {
-      const answer = answers.find((a) => +a.item_id === item.id);
-      if (!answer) throw new BadRequestException(`missing answer for item ${item.id}`);
-      if (!answer.delivered && !answer.reason) throw new BadRequestException(`missing reason for item ${item.id}`);
-    }
-    if (!body?.signature_png) throw new BadRequestException('signature is required');
+    let attemptId: number;
+    await this.tasks.manager.transaction(async (em) => {
+      const issuance = await lockIssuance(em, task.issuance_id);
+      const locked = await em.getRepository(DeliveryTask).createQueryBuilder('t').setLock('pessimistic_write').where('t.id = :id', { id: task.id }).getOne();
+      if (!locked || locked.status !== TaskStatus.pending) throw new ConflictException('task is no longer open, it was reported or reassigned meanwhile');
+      if (issuance.status !== IssuanceStatus.assigned) throw new ConflictException(`issuance is ${issuance.status}, a delivery report needs it assigned`);
 
-    const recipientType = body.recipient_type === RecipientType.other ? RecipientType.other : RecipientType.customer;
-    if (recipientType === RecipientType.other && (!body.recipient_name || !body.recipient_id_number || !body.recipient_phone)) {
-      throw new BadRequestException('recipient details are required when someone else received the delivery');
-    }
-
-    const deliveredCount = answers.filter((a) => !!a.delivered).length;
-    const outcome = deliveredCount === items.length ? AttemptOutcome.delivered : deliveredCount === 0 ? AttemptOutcome.not_delivered : AttemptOutcome.partially_delivered;
-
-    const attempt = this.attempts.create({
-      task_id: task.id,
-      outcome,
-      recipient_type: recipientType,
-      //when the customer signs we copy the customer details, so the attempt row reads on its own
-      recipient_name: recipientType === RecipientType.other ? body.recipient_name : task.issuance.customer_name,
-      recipient_id_number: recipientType === RecipientType.other ? body.recipient_id_number : task.issuance.customer_id_number,
-      recipient_phone: recipientType === RecipientType.other ? body.recipient_phone : task.issuance.customer_phone,
-      signature_png: body.signature_png,
-      items: items.map((item) => {
-        const a = answers.find((x) => +x.item_id === item.id);
-        return { item_id: item.id, delivered: !!a.delivered, reason: a.delivered ? null : a.reason, reason_details: a.delivered ? null : a.reason_details || null };
-      }),
-    });
-    //one attempt closes the task. whether a failed delivery should reopen as a new task or go back to the manager is an open rule,
-    //so today it just goes back to the board with the not_delivered status and the manager decides.
-    //plain update() on the task, not save(task): task was loaded with attempts=[] and save would "orphan" the attempt we just inserted (sets task_id null)
-    await this.attempts.manager.transaction(async (em) => {
+      const attempt = em.create(DeliveryAttempt, {
+        task_id: task.id,
+        outcome,
+        recipient_type: recipient.type,
+        recipient_name: recipient.name,
+        recipient_id_number: recipient.id_number,
+        recipient_phone: recipient.phone,
+        signature_png: signature,
+        items: answers,
+      });
       await em.save(attempt);
-      await em.update(DeliveryTask, task.id, { status: TaskStatus.done, closed_at: new Date() });
+      attemptId = attempt.id;
+
+      //conditional update on top of the lock, so even a code path that forgot the lock cannot close a task twice.
+      //one attempt closes the task. whether a failed delivery should reopen as a new task or go back to the manager is an
+      //open rule, so today it goes back to the board with the not_delivered status and the manager decides
+      const closed = await em.update(DeliveryTask, { id: task.id, status: TaskStatus.pending }, { status: TaskStatus.done, closed_at: new Date() });
+      if (!closed.affected) throw new ConflictException('task was closed by another request');
       await em.update(Issuance, task.issuance_id, { status: outcome as any });
     });
 
     this.logger.log(`task ${task.id} (${task.issuance.sap_number}) reported ${outcome} by courier ${user.courier_id}`);
-    return { attempt_id: attempt.id, outcome };
+    return { attempt_id: attemptId, outcome };
   }
 
   /*──────────────────────────────────────────────────────────────────────────*/

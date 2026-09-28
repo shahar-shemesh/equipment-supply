@@ -7,6 +7,7 @@ import { IssuancesModule } from './issuances/issuances.module';
 import { CouriersModule } from './couriers/couriers.module';
 import { DeliveryModule } from './delivery/delivery.module';
 import { SeedModule } from './seed/seed.module';
+import { schemaSyncAllowed } from './env';
 
 @Module({
   imports: [
@@ -21,8 +22,9 @@ import { SeedModule } from './seed/seed.module';
         database: process.env.DB_NAME || 'equipment_supply',
         entities,
         //synchronize rebuilds the tables from the entity classes on every start. good enough for the local foundation,
-        //has to become migrations before there is a shared environment with data anyone cares about
-        synchronize: true,
+        //has to become migrations before there is a shared environment with data anyone cares about.
+        //only on when ENVIRONMENT=LOCAL and DB_SYNCHRONIZE=true, see env.ts
+        synchronize: schemaSyncAllowed(),
         logging: !!process.env.DB_LOGGING,
       }),
     }),

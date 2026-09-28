@@ -1,9 +1,10 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 
 import { IssuanceStatus, Priority, TaskStatus } from '../../../shared/@core';
 import { Issuance, DeliveryTask, Courier } from '../entities';
+import { assertCanDo, editableStatuses } from './issuance.rules';
 
 //the open task, or the last closed one when there is no open task. the board shows its courier.
 //items are sorted here and not in the query: an ORDER BY on a joined column breaks typeorm's skip/take (it paginates distinct rows, not distinct issuances)
@@ -12,6 +13,23 @@ export function withCurrentTask(issuance: Issuance) {
   const current = tasks.find((t) => t.status === TaskStatus.pending) || tasks.sort((a, b) => b.id - a.id)[0] || null;
   const items = (issuance.items || []).sort((a, b) => a.line_no - b.line_no);
   return { ...issuance, items, current_task: current };
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//SELECT ... FOR UPDATE on one issuance row. every flow that changes an issuance or its tasks (assign, self pickup, delete here,
+//the courier's report in delivery.service) takes this lock first and only then touches tasks. same order everywhere, so two
+//flows on the same issuance run one after the other instead of deadlocking or both succeeding
+export function lockIssuance(em: EntityManager, id: number) {
+  return em.getRepository(Issuance).createQueryBuilder('i').setLock('pessimistic_write').where('i.id = :id', { id }).getOne();
+}
+
+export async function cancelOpenTasks(em: EntityManager, issuanceId: number) {
+  await em.update(DeliveryTask, { issuance_id: issuanceId, status: TaskStatus.pending }, { status: TaskStatus.cancelled, closed_at: new Date() });
+}
+
+function isIsoDate(s: any) {
+  return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(Date.parse(s));
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/
@@ -73,59 +91,91 @@ export class IssuancesService {
   // PATCH /api/issuances/:id - priority, delivery_date, notes, self_pickup.
   //nothing else is editable from here, the customer / items / address belong to the SAP document
   async update(id: number, body: any, user: any) {
-    const issuance = await this.issuances.findOne({ where: { id } });
-    if (!issuance) throw new NotFoundException(`issuance ${id} not found`);
-    if (issuance.status === IssuanceStatus.deleted) throw new BadRequestException('issuance was deleted');
+    const priority = body?.priority;
+    if (priority && !Object.values(Priority).includes(priority)) throw new BadRequestException(`unknown priority ${priority}`);
 
-    if (body?.priority) issuance.priority = body.priority;
-    if ('delivery_date' in (body || {})) issuance.delivery_date = body.delivery_date || null;
-    if ('notes' in (body || {})) issuance.notes = body.notes;
+    const hasDate = 'delivery_date' in (body || {});
+    const date = hasDate ? body.delivery_date || null : undefined;
+    if (date && !isIsoDate(date)) throw new BadRequestException('delivery_date must be yyyy-mm-dd');
 
-    //self pickup ends the courier side of this issuance. what SAP should hear about it is an open question
-    if (body?.self_pickup) {
-      issuance.self_pickup = true;
-      issuance.status = IssuanceStatus.self_pickup;
-      await this.cancelOpenTasks(id);
-      this.logger.log(`issuance ${issuance.sap_number} moved to self pickup by user ${user?.sub}`);
-    }
+    const hasNotes = 'notes' in (body || {});
+    if (hasNotes && body.notes != null && (typeof body.notes !== 'string' || body.notes.length > 500)) throw new BadRequestException('notes must be a string up to 500 chars');
 
-    await this.issuances.save(issuance);
+    const wantsSelfPickup = !!body?.self_pickup;
+
+    await this.issuances.manager.transaction(async (em) => {
+      const issuance = await lockIssuance(em, id);
+      if (!issuance) throw new NotFoundException(`issuance ${id} not found`);
+      assertCanDo(wantsSelfPickup ? 'self_pickup' : 'edit', issuance);
+
+      if (priority) issuance.priority = priority;
+      if (hasDate) issuance.delivery_date = date;
+      if (hasNotes) issuance.notes = body.notes;
+
+      //self pickup ends the courier side of this issuance. what SAP should hear about it is an open question
+      if (wantsSelfPickup) {
+        issuance.self_pickup = true;
+        issuance.status = IssuanceStatus.self_pickup;
+        await cancelOpenTasks(em, id);
+        this.logger.log(`issuance ${issuance.sap_number} moved to self pickup by user ${user?.sub}`);
+      }
+
+      await em.save(issuance);
+    });
+
     return this.findOne(id);
   }
 
   /*──────────────────────────────────────────────────────────────────────────*/
 
   // POST /api/issuances/mark-urgent { ids }
+  //closed rows are skipped, not an error: the bar action is a bulk shortcut and the count tells the manager what happened
   async setPriority(ids: number[], priority: Priority) {
     if (!ids.length) return { updated: 0 };
-    await this.issuances.update(ids, { priority });
-    return { updated: ids.length };
+    if (!Object.values(Priority).includes(priority)) throw new BadRequestException(`unknown priority ${priority}`);
+
+    const res = await this.issuances
+      .createQueryBuilder()
+      .update()
+      .set({ priority })
+      .where('id IN (:...ids) AND status IN (:...open)', { ids, open: editableStatuses })
+      .execute();
+    return { updated: res.affected || 0 };
   }
 
   /*──────────────────────────────────────────────────────────────────────────*/
 
   // POST /api/issuances/assign { ids, courier_id, scheduled_date? }
-  //one task per issuance. a previous open task is cancelled, not edited, so "who had it before" stays in the table
+  //one task per issuance. a previous open task is cancelled, not edited, so "who had it before" stays in the table.
+  //all or nothing: one issuance that may not be assigned (delivered, deleted, partially delivered...) fails the whole batch
+  //with 409 and nothing is written. ids are locked in ascending order so two managers with overlapping batches cannot deadlock
   async assign(ids: number[], courierId: number, scheduledDate: string, user: any) {
     if (!ids.length) throw new BadRequestException('no issuances selected');
+    if (scheduledDate && !isIsoDate(scheduledDate)) throw new BadRequestException('scheduled_date must be yyyy-mm-dd');
+
     const courier = await this.couriers.findOne({ where: { id: courierId, active: true } });
     if (!courier) throw new NotFoundException(`courier ${courierId} not found`);
 
-    for (const id of ids) {
-      const issuance = await this.issuances.findOne({ where: { id } });
-      if (!issuance || issuance.status === IssuanceStatus.deleted) continue;
+    const sorted = [...new Set(ids)].sort((a, b) => a - b);
 
-      await this.cancelOpenTasks(id);
-      await this.tasks.save(this.tasks.create({ issuance_id: id, courier_id: courierId, scheduled_date: scheduledDate || issuance.delivery_date || null, assigned_by: user?.sub ?? null }));
+    await this.issuances.manager.transaction(async (em) => {
+      for (const id of sorted) {
+        const issuance = await lockIssuance(em, id);
+        if (!issuance) throw new NotFoundException(`issuance ${id} not found`);
+        assertCanDo('assign', issuance);
 
-      issuance.status = IssuanceStatus.assigned;
-      issuance.self_pickup = false;
-      if (scheduledDate) issuance.delivery_date = scheduledDate;
-      await this.issuances.save(issuance);
-    }
+        await cancelOpenTasks(em, id);
+        await em.save(em.create(DeliveryTask, { issuance_id: id, courier_id: courierId, scheduled_date: scheduledDate || issuance.delivery_date || null, assigned_by: user?.sub ?? null }));
 
-    this.logger.log(`===== assigned ${ids.length} issuances to ${courier.name} =====`);
-    return { assigned: ids.length, courier };
+        issuance.status = IssuanceStatus.assigned;
+        issuance.self_pickup = false;
+        if (scheduledDate) issuance.delivery_date = scheduledDate;
+        await em.save(issuance);
+      }
+    });
+
+    this.logger.log(`===== assigned ${sorted.length} issuances to ${courier.name} =====`);
+    return { assigned: sorted.length, courier };
   }
 
   /*──────────────────────────────────────────────────────────────────────────*/
@@ -133,16 +183,22 @@ export class IssuancesService {
   // DELETE /api/issuances/:id { reason }
   //soft delete. the design asks for a reason and warns it cannot be undone, so the row keeps deleted_at + delete_reason
   async softDelete(id: number, reason: string, user: any) {
-    const issuance = await this.issuances.findOne({ where: { id } });
-    if (!issuance) throw new NotFoundException(`issuance ${id} not found`);
+    if (reason != null && (typeof reason !== 'string' || reason.length > 500)) throw new BadRequestException('reason must be a string up to 500 chars');
 
-    issuance.status = IssuanceStatus.deleted;
-    issuance.deleted_at = new Date();
-    issuance.delete_reason = reason || null;
-    await this.cancelOpenTasks(id);
-    await this.issuances.save(issuance);
+    await this.issuances.manager.transaction(async (em) => {
+      const issuance = await lockIssuance(em, id);
+      if (!issuance) throw new NotFoundException(`issuance ${id} not found`);
+      assertCanDo('delete', issuance);
 
-    this.logger.warn(`issuance ${issuance.sap_number} deleted by user ${user?.sub}, reason: ${reason || '-'}`);
+      issuance.status = IssuanceStatus.deleted;
+      issuance.deleted_at = new Date();
+      issuance.delete_reason = reason?.trim() || null;
+      await cancelOpenTasks(em, id);
+      await em.save(issuance);
+
+      this.logger.warn(`issuance ${issuance.sap_number} deleted by user ${user?.sub}, reason: ${issuance.delete_reason || '-'}`);
+    });
+
     return { deleted: id };
   }
 
@@ -165,11 +221,5 @@ export class IssuancesService {
       by_city: byCity.map((r) => ({ city: r.city, count: +r.count })),
       cities: cities.map((r) => r.city), //for the city filter dropdown
     };
-  }
-
-  /*──────────────────────────────────────────────────────────────────────────*/
-
-  private async cancelOpenTasks(issuanceId: number) {
-    await this.tasks.update({ issuance_id: issuanceId, status: TaskStatus.pending }, { status: TaskStatus.cancelled, closed_at: new Date() });
   }
 }
