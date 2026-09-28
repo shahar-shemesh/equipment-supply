@@ -49,7 +49,8 @@ export class AuthService {
       courier_id: courier?.id ?? null,
     };
     // console.log('login payload', payload);
-    return { token: this.jwt.sign(payload), user: payload };
+    //the jwt calls the user id sub, IUser calls it id. both go back so the tablet never keys its local storage on undefined
+    return { token: this.jwt.sign(payload), user: { id: user.id, ...payload } };
   }
 
   /*──────────────────────────────────────────────────────────────────────────*/

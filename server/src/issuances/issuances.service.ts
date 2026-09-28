@@ -151,10 +151,12 @@ export class IssuancesService {
       if (hasDate) issuance.delivery_date = date;
       if (hasNotes) issuance.notes = body.notes;
 
-      //self pickup ends the courier side of this issuance. what SAP should hear about it is an open question
+      //self pickup ends the courier side of this issuance. what SAP should hear about it is an open question.
+      //it also bumps the revision, a plain priority / date / notes edit does not (see the column in issuance.entity)
       if (wantsSelfPickup) {
         issuance.self_pickup = true;
         issuance.status = IssuanceStatus.self_pickup;
+        issuance.revision += 1;
         await cancelOpenTasks(em, id);
         this.logger.log(`issuance ${issuance.sap_number} moved to self pickup by user ${user?.sub}`);
       }
@@ -212,6 +214,7 @@ export class IssuancesService {
 
         issuance.status = IssuanceStatus.assigned;
         issuance.self_pickup = false;
+        issuance.revision += 1; //a report written against the old task is stale now, whoever the new courier is
         if (scheduledDate) issuance.delivery_date = scheduledDate;
         await em.save(issuance);
       }
@@ -236,6 +239,7 @@ export class IssuancesService {
       issuance.status = IssuanceStatus.deleted;
       issuance.deleted_at = new Date();
       issuance.delete_reason = reason?.trim() || null;
+      issuance.revision += 1;
       await cancelOpenTasks(em, id);
       await em.save(issuance);
 

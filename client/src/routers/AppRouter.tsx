@@ -11,6 +11,7 @@ import ReportsPage from "../manager/pages/ReportsPage";
 import CourierLayout from "../courier/CourierLayout";
 import DeliveryBoard from "../courier/pages/DeliveryBoard";
 import TaskDetailPage from "../courier/pages/TaskDetailPage";
+import ReportDetailPage from "../courier/pages/ReportDetailPage";
 
 //two separate trees, like the information architecture diagram: צד מנהל מחסן under /manager, צד משנע under /courier
 export function AppRouter() {
@@ -29,6 +30,8 @@ export function AppRouter() {
         <Route path="/courier" element={<RequireRole role={UserRole.courier}><CourierLayout /></RequireRole>}>
           <Route index element={<DeliveryBoard />} />
           <Route path="tasks/:id" element={<TaskDetailPage />} />
+          {/* a report saved on this device, by its operation id. lives under the layout so the sync strip stays */}
+          <Route path="reports/:operationId" element={<ReportDetailPage />} />
         </Route>
 
         <Route path="*" element={<HomeRedirect />} />

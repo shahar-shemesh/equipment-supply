@@ -23,7 +23,9 @@ import { schemaSyncAllowed } from './env';
         entities,
         //synchronize rebuilds the tables from the entity classes on every start. good enough for the local foundation,
         //has to become migrations before there is a shared environment with data anyone cares about.
-        //only on when ENVIRONMENT=LOCAL and DB_SYNCHRONIZE=true, see env.ts
+        //only on when ENVIRONMENT=LOCAL and DB_SYNCHRONIZE=true, see env.ts.
+        //everywhere else the schema moves with npm run migration:run (src/migrations, src/data-source.ts) before the new
+        //build starts. no migrationsRun here on purpose: a schema change is a deliberate step, not a side effect of a restart
         synchronize: schemaSyncAllowed(),
         logging: !!process.env.DB_LOGGING,
       }),

@@ -16,7 +16,7 @@ const Ctx = createContext<AuthCtx>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<IUser | null>(() => {
     try {
-      return JSON.parse(localStorage.getItem(USER_KEY) || "null");
+      return normalizeUser(JSON.parse(localStorage.getItem(USER_KEY) || "null"));
     } catch (e) {
       return null;
     }
@@ -24,10 +24,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function login(username: string, password: string) {
     const res = await post("/auth/login", { username, password });
+    const u = normalizeUser(res.user);
     localStorage.setItem(TOKEN_KEY, res.token);
-    localStorage.setItem(USER_KEY, JSON.stringify(res.user));
-    setUser(res.user);
-    return res.user as IUser;
+    localStorage.setItem(USER_KEY, JSON.stringify(u));
+    setUser(u);
+    return u;
   }
 
   function logout() {
@@ -37,6 +38,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return <Ctx.Provider value={{ user, login, logout }}>{children}</Ctx.Provider>;
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//the server now returns user.id next to the jwt's sub, but a session stored before that change has only sub. the offline
+//data layer keys everything by user.id, so fill it here once instead of teaching every reader about both names
+function normalizeUser(u: any): IUser | null {
+  if (!u) return null;
+  return { ...u, id: u.id ?? u.sub };
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/

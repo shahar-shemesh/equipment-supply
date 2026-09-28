@@ -53,6 +53,15 @@ export class Issuance {
   @Column({ default: 'sample' })
   source: string; //'sample' = seeded. the SAP interface is not defined yet, when it is it should write 'sap' here
 
+  //the concurrency token of an offline delivery report: the tablet stores it with the snapshot and sends it back, a
+  //different number means the issuance changed materially since. bumped inside the locked transactions of assign,
+  //self pickup, delete and the report itself. priority / delivery_date / notes edits and mark urgent leave it alone,
+  //a report written before such an edit is still good. today every bump also cancels or closes the task, so the task
+  //check in delivery.service fires first and this is a forward guard for bump sources that do not touch the task
+  //(item or customer changes from SAP, when that interface exists)
+  @Column({ default: 1 })
+  revision: number;
+
   @Column({ type: 'timestamptz', nullable: true })
   deleted_at: Date;
 

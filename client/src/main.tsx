@@ -8,10 +8,14 @@ import Translation from "../../shared/i18n";
 import { RtlTheme } from "./theme/RtlTheme";
 import { AuthProvider } from "./utils/auth";
 import { AppRouter } from "./routers/AppRouter";
+import { registerServiceWorker } from "./courier/offline/sw";
 
 import "./styles/index.scss";
 
 i18n.use(initReactI18next).init(Translation as any);
+
+//the offline shell (built app only, the dev server has no worker). prompt mode: an update waits for the עדכון button
+if (import.meta.env.PROD && "serviceWorker" in navigator) registerServiceWorker();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   // <React.StrictMode>

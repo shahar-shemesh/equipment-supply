@@ -39,7 +39,12 @@ export class DeliveryAttempt {
   signature_png: string;
 
   @CreateDateColumn()
-  reported_at: Date;
+  reported_at: Date; //server receipt time, the meaning it always had
+
+  //the device clock when the courier tapped send, from the offline queue. untrusted and can be hours before reported_at
+  //after an outage. null for a legacy request or a junk value, never a reason to reject the report
+  @Column({ type: 'timestamptz', nullable: true })
+  client_reported_at: Date;
 
   @OneToMany(() => DeliveryAttemptItem, (i) => i.attempt, { cascade: true })
   items: DeliveryAttemptItem[];

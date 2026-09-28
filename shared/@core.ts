@@ -49,10 +49,31 @@ export enum RecipientType {
   other = "other",
 }
 
+// offline courier: where a delivery report saved on the device stands with the server. a separate axis from the business
+// enums above on purpose: the report is "delivered" the moment the courier signs it, whether or not the server heard yet
+export enum ReportSyncState {
+  queued = "queued", //saved on the device, waiting for the network
+  syncing = "syncing", //a request is in flight right now
+  synced = "synced", //the server acknowledged it, the ack is stored next to the report
+  auth = "auth", //the server said 401, the same account has to sign in again
+  invalid = "invalid", //400, the server rejected the payload. kept for attention, no automatic retry
+  forbidden = "forbidden", //403 / 404, the task is not this courier's any more
+  conflict = "conflict", //409, the task changed under the report (reported elsewhere, reassigned, revision moved)
+}
+
+// the `code` on a 409 from POST /api/delivery/tasks/:id/attempts, so the screen can say in hebrew what happened
+export enum ReportConflictCode {
+  task_closed = "task_closed", //reported already, by this device or another one
+  task_cancelled = "task_cancelled", //reassigned, moved to self pickup or deleted
+  issuance_not_assigned = "issuance_not_assigned",
+  revision_changed = "revision_changed", //the issuance changed materially since the snapshot the report was written on
+  operation_reused = "operation_reused", //same operation id, different content
+}
+
 /*──────────────────────────────────────────────────────────────────────────*/
 
 export interface IUser {
-  id: number;
+  id: number; //users.id. the jwt calls it sub, auth.service.login returns both so the client never keys local storage on undefined
   username: string;
   display_name: string;
   role: UserRole;
@@ -106,6 +127,7 @@ export interface IIssuance {
   self_pickup: boolean;
   notes?: string;
   source: string;
+  revision?: number; //bumped by every change that invalidates an offline delivery report (assign, self pickup, delete, a report). priority / date / notes edits leave it alone
   deleted_at?: string;
   delete_reason?: string;
   items?: IIssuanceItem[];
@@ -127,6 +149,15 @@ export interface IDeliveryTask {
   issuance?: IIssuance;
   courier?: ICourier;
   attempts?: IDeliveryAttempt[];
+  local_report?: ILocalReportRef; //client only, set by the offline data layer when a report saved on this device overlays the server snapshot
+}
+
+// client only, never sent by the server: how the board and the detail screen know a task has a report saved on this device
+export interface ILocalReportRef {
+  operation_id: string;
+  state: ReportSyncState;
+  conflict_code?: ReportConflictCode;
+  client_reported_at: string;
 }
 
 export interface IDeliveryAttemptItem {
@@ -146,7 +177,8 @@ export interface IDeliveryAttempt {
   recipient_id_number?: string;
   recipient_phone?: string;
   signature_png?: string; //data url
-  reported_at: string;
+  reported_at: string; //server receipt time
+  client_reported_at?: string; //the device clock when the courier tapped send. untrusted, can be hours before reported_at after an outage
   items?: IDeliveryAttemptItem[];
 }
 
@@ -158,6 +190,21 @@ export interface IAttemptPayload {
   recipient_phone?: string;
   signature_png: string;
   items: IDeliveryAttemptItem[];
+  //offline queue: the same operation_id sent again is a replay of the first result, not a second attempt.
+  //all three are optional, a request without them behaves exactly as before the offline work
+  operation_id?: string;
+  issuance_revision?: number; //IIssuance.revision the report was written against, 409 revision_changed when it moved
+  client_reported_at?: string; //iso, from the device clock
+}
+
+// what POST /api/delivery/tasks/:id/attempts answers. stored with the operation, so a retry gets the same body back
+export interface IAttemptResult {
+  attempt_id: number;
+  outcome: AttemptOutcome;
+  task_id: number;
+  reported_at: string;
+  operation_id?: string;
+  replayed?: boolean; //the server already had this operation and returned the stored result
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/

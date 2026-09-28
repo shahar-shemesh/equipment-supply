@@ -6,6 +6,7 @@ import { Alert, Button, TextField } from "@mui/material";
 import { Logo } from "../components/Logo";
 import { homeOf, useAuth } from "../utils/auth";
 import { get } from "../utils/service";
+import { useOtherAccountsWork } from "../courier/offline/useCourierData";
 
 export default function LoginPage() {
   const { t } = useTranslation();
@@ -17,6 +18,9 @@ export default function LoginPage() {
   const [accounts, setAccounts] = useState<any[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [online, setOnline] = useState(navigator.onLine);
+  //every account on this device with reports still waiting to go out, whoever signs in next should know
+  const { data: pendingWork } = useOtherAccountsWork(null);
 
   //the seeded accounts, only returned by the server in dev-local
   useEffect(() => {
@@ -26,6 +30,18 @@ export default function LoginPage() {
   useEffect(() => {
     if (user) navigate(homeOf(user), { replace: true });
   }, [user]);
+
+  //login needs the server, so the page says when there is no network at all (onLine is a hint, the attempt still runs)
+  useEffect(() => {
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => {
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
+    };
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -50,6 +66,11 @@ export default function LoginPage() {
           <span>{t("app_name_long")}</span>
         </div>
         <h1>{t("login_title")}</h1>
+
+        {!online && <Alert severity="warning">{t("login_offline")}</Alert>}
+        {pendingWork.map((w) => (
+          <Alert key={w.scope} severity="info">{t("login_pending_work", { count: w.count, name: w.display_name || w.username })}</Alert>
+        ))}
 
         {/* phone keyboards capitalize the first letter and autocorrect by default, the server matches the username as typed */}
         <TextField label={t("login_username")} value={username} onChange={(e) => setUsername(e.target.value)} autoFocus fullWidth autoComplete="username" inputProps={{ autoCapitalize: "none", autoCorrect: "off", spellCheck: false }} />

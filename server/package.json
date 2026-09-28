@@ -11,7 +11,11 @@
     "seed": "ts-node src/seed/seed.ts",
     "test": "jest --runInBand",
     "test:unit": "jest --testPathIgnorePatterns e2e",
-    "test:e2e": "jest --runInBand src/e2e"
+    "test:e2e": "jest --runInBand src/e2e",
+    "migration:run": "typeorm-ts-node-commonjs migration:run -d src/data-source.ts",
+    "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/data-source.ts",
+    "migration:show": "typeorm-ts-node-commonjs migration:show -d src/data-source.ts",
+    "migration:run:prod": "typeorm migration:run -d dist/server/src/data-source.js"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.4",

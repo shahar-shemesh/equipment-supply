@@ -15,7 +15,8 @@ export class AuthController {
   @Get('me')
   @UseGuards(AuthGuard)
   me(@CurrentUser() user: any) {
-    return user;
+    //same shape as login's user: id next to sub
+    return { id: user.sub, ...user };
   }
 
   @Get('dev-accounts')

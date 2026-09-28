@@ -1,4 +1,4 @@
-import { IIssuance, IssuanceStatus, NonDeliveryReason, Priority, TaskStatus } from "./@core";
+import { IDeliveryTask, IIssuance, IssuanceStatus, NonDeliveryReason, Priority, TaskStatus } from "./@core";
 
 // both boards show issuances that go to the same customer + address as one collapsed row ("2 הנפקות").
 // this is a display grouping only, the db has no group entity. rows keep their order, a group sits where its first row was
@@ -55,3 +55,23 @@ export const reasonKeys: Record<NonDeliveryReason, string> = {
     [NonDeliveryReason.customer_refused]: "reason_customer_refused",
     [NonDeliveryReason.other]: "reason_other",
 };
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+// mirrors the ORDER BY of DeliveryService.myTasks, so the courier board sorted from the local snapshot lands in the same
+// order the server sends: status desc ('pending' > 'done' as text, the columns are varchar), priority desc (urgent before
+// normal), scheduled_date asc with nulls last, id asc. a task that a queued report turned into done drops below the open ones
+export function compareTasksForBoard(a: IDeliveryTask, b: IDeliveryTask) {
+    if (a.status !== b.status) return a.status > b.status ? -1 : 1;
+    const pa = a.issuance?.priority || "";
+    const pb = b.issuance?.priority || "";
+    if (pa !== pb) return pa > pb ? -1 : 1;
+    const da = a.scheduled_date || "";
+    const db = b.scheduled_date || "";
+    if (da !== db) {
+        if (!da) return 1;
+        if (!db) return -1;
+        return da < db ? -1 : 1;
+    }
+    return a.id - b.id;
+}

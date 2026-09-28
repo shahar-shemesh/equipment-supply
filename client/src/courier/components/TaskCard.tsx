@@ -8,8 +8,10 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { IDeliveryTask, IssuanceStatus, TaskStatus } from "../../../../shared/@core";
 import { StatusBadge } from "../../components/StatusBadge";
 import { displayNumber, fullAddress } from "../../utils/format";
+import { SyncChip } from "./SyncChip";
 
-//what the courier card should show as status: an open task is ממתין, a closed one shows how it ended
+//what the courier card should show as status: an open task is ממתין, a closed one shows how it ended.
+//a report saved on this device already moved task.status and issuance.status (the overlay in the data layer)
 function cardStatus(task: IDeliveryTask) {
   return task.status === TaskStatus.pending ? IssuanceStatus.assigned : task.issuance.status;
 }
@@ -28,7 +30,10 @@ export function TaskCard({ task }: { task: IDeliveryTask }) {
         <div>{i.customer_name}</div>
         <div className="muted">{i.customer_phone}</div>
       </div>
-      <div className="task-card__status"><StatusBadge status={cardStatus(task)} /></div>
+      <div className="task-card__status">
+        <StatusBadge status={cardStatus(task)} />
+        {task.local_report && <SyncChip state={task.local_report.state} short />}
+      </div>
     </div>
   );
 }
@@ -65,7 +70,10 @@ export function TaskGroupCard({ tasks }: { tasks: IDeliveryTask[] }) {
       {open && tasks.map((task) => (
         <div key={task.id} className="task-card__sub" onClick={() => navigate(`/courier/tasks/${task.id}`)}>
           <div className="task-card__number">{displayNumber(task.issuance)}</div>
-          <div className="task-card__status"><StatusBadge status={cardStatus(task)} /></div>
+          <div className="task-card__status">
+            <StatusBadge status={cardStatus(task)} />
+            {task.local_report && <SyncChip state={task.local_report.state} short />}
+          </div>
         </div>
       ))}
     </div>
