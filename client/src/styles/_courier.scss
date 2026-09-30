@@ -792,3 +792,22 @@
         overflow-wrap: anywhere;
     }
 }
+
+// the evidence axis under a conflict chip (EvidenceLine.tsx): only here, on its way, with the manager, or reviewed
+.evidence-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 12px;
+    font-size: 13px;
+    color: var(--color-text-secondary);
+
+    &--received,
+    &--reviewed {
+        color: #1B7F45;
+    }
+
+    &--failed {
+        color: var(--color-danger);
+    }
+}

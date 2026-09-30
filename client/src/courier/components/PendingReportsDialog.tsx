@@ -5,18 +5,18 @@ import { Alert, Button, Dialog, DialogContent, IconButton } from "@mui/material"
 import CloseIcon from "@mui/icons-material/Close";
 import SyncIcon from "@mui/icons-material/Sync";
 
-import { IssuanceStatus, ReportSyncState } from "../../../../shared/@core";
+import { EvidenceUploadState, IssuanceStatus, ReportSyncState } from "../../../../shared/@core";
 import { StatusBadge } from "../../components/StatusBadge";
 import { displayNumber, formatDateTime } from "../../utils/format";
 import { LocalReport } from "../offline/db";
 import { requestPersistentStorage } from "../offline/storage";
-import { retryAll, retryReport } from "../offline/store";
+import { evidenceOf, needsAttention, retryAll, retryReport } from "../offline/store";
 import { kickSync } from "../offline/sync";
 import { useReports } from "../offline/useCourierData";
 import { SyncChip } from "./SyncChip";
+import { EvidenceLine } from "./EvidenceLine";
 
 const QUEUED = [ReportSyncState.queued, ReportSyncState.syncing, ReportSyncState.auth];
-const ATTENTION = [ReportSyncState.invalid, ReportSyncState.forbidden, ReportSyncState.conflict];
 const RETRYABLE = [ReportSyncState.queued, ReportSyncState.auth];
 
 type Props = { open: boolean; onClose: () => void; scope: string | null };
@@ -37,7 +37,9 @@ export function PendingReportsDialog({ open, onClose, scope }: Props) {
   }, [open, scope]);
 
   const queued = reports.filter((r) => QUEUED.includes(r.sync.state));
-  const attention = reports.filter((r) => ATTENTION.includes(r.sync.state));
+  //a conflict leaves the attention list once a manager marked its evidence reviewed; it never leaves the device
+  const attention = reports.filter(needsAttention);
+  const reviewed = reports.filter((r) => r.sync.state === ReportSyncState.conflict && evidenceOf(r).state === EvidenceUploadState.reviewed);
   const synced = reports.filter((r) => r.sync.state === ReportSyncState.synced);
 
   async function retryOne(r: LocalReport) {
@@ -85,6 +87,7 @@ export function PendingReportsDialog({ open, onClose, scope }: Props) {
               {r.sync.state === ReportSyncState.queued && r.sync.next_at && <span className="muted small">{t("sync_next_try", { time: formatDateTime(r.sync.next_at) })}</span>}
             </div>
             {r.sync.state === ReportSyncState.conflict && r.sync.conflict_code && <div className="pending-dialog__error">{t(`conflict_${r.sync.conflict_code}`)}</div>}
+            <EvidenceLine report={r} scope={scope} />
             {r.sync.last_error && r.sync.state !== ReportSyncState.synced && <div className="pending-dialog__error small">{t("sync_last_error", { error: r.sync.last_error })}</div>}
             <div className="pending-dialog__actions">
               <button type="button" className="link-button" onClick={() => view(r)}>{t("sync_view_report")}</button>
@@ -118,6 +121,7 @@ export function PendingReportsDialog({ open, onClose, scope }: Props) {
 
         {section(t("sync_section_queued"), queued)}
         {section(t("sync_section_attention"), attention)}
+        {section(t("sync_section_reviewed"), reviewed)}
         {section(t("sync_section_synced"), synced)}
 
         {/* persist() is a request, not a promise: "clear site data" and an eviction still delete everything */}

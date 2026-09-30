@@ -46,6 +46,7 @@ export default function ManagerLayout() {
             <nav className="app-header__nav">
               <NavLink to="/manager/issuances">{t("nav_issuances")}</NavLink>
               <NavLink to="/manager/couriers">{t("nav_couriers")}</NavLink>
+              <NavLink to="/manager/conflicts">{t("nav_conflicts")}</NavLink>
               <NavLink to="/manager/reports">{t("nav_reports")}</NavLink>
             </nav>
             <div className="app-header__user">
@@ -74,6 +75,7 @@ export default function ManagerLayout() {
         <nav className="manager-drawer__nav">
           <NavLink to="/manager/issuances" onClick={closeMenu}>{t("nav_issuances")}</NavLink>
           <NavLink to="/manager/couriers" onClick={closeMenu}>{t("nav_couriers")}</NavLink>
+          <NavLink to="/manager/conflicts" onClick={closeMenu}>{t("nav_conflicts")}</NavLink>
           <NavLink to="/manager/reports" onClick={closeMenu}>{t("nav_reports")}</NavLink>
         </nav>
         <div className="manager-drawer__user">

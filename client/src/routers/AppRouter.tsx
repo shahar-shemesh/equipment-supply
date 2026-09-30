@@ -8,6 +8,7 @@ import ManagerLayout from "../manager/ManagerLayout";
 import IssuancesBoard from "../manager/pages/IssuancesBoard";
 import CouriersPage from "../manager/pages/CouriersPage";
 import ReportsPage from "../manager/pages/ReportsPage";
+import ConflictsPage from "../manager/pages/ConflictsPage";
 import CourierLayout from "../courier/CourierLayout";
 import DeliveryBoard from "../courier/pages/DeliveryBoard";
 import TaskDetailPage from "../courier/pages/TaskDetailPage";
@@ -24,6 +25,7 @@ export function AppRouter() {
           <Route index element={<Navigate to="issuances" replace />} />
           <Route path="issuances" element={<IssuancesBoard />} />
           <Route path="couriers" element={<CouriersPage />} />
+          <Route path="conflicts" element={<ConflictsPage />} />
           <Route path="reports" element={<ReportsPage />} />
         </Route>
 

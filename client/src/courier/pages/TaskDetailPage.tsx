@@ -21,6 +21,7 @@ import { useTask } from "../offline/useCourierData";
 import { ItemAnswer, ItemReportCard } from "../components/ItemReportCard";
 import { SignaturePad } from "../components/SignaturePad";
 import { SyncChip } from "../components/SyncChip";
+import { EvidenceLine } from "../components/EvidenceLine";
 import { PendingReportsDialog } from "../components/PendingReportsDialog";
 
 type Point = { x: number; y: number };
@@ -334,6 +335,7 @@ export default function TaskDetailPage() {
               {local.ack && <span className="muted small">{t("sync_received_at", { time: formatDateTime(local.ack.reported_at) })}</span>}
               {/* the server's report above is the truth, this line says why the one saved here was refused */}
               {local.sync.state === ReportSyncState.conflict && local.sync.conflict_code && <span className="small">{t(`conflict_${local.sync.conflict_code}`)}</span>}
+              <EvidenceLine report={local} scope={scope} />
               <Link to={`/courier/reports/${local.operation_id}`} className="small">{t("sync_view_report")}</Link>
             </div>
           )}

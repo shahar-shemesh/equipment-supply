@@ -1,9 +1,9 @@
 import axios from "axios";
 
-import { AttemptOutcome, IAttemptResult, ReportConflictCode, ReportSyncState } from "../../../../shared/@core";
+import { AttemptOutcome, ConflictReviewStatus, EvidenceUploadState, IAttemptResult, IConflictReceipt, IConflictStatus, ReportConflictCode, ReportSyncState } from "../../../../shared/@core";
 import { currentToken, decodeJwt, tokenIsFresh } from "./identity";
 import { LocalReport } from "./db";
-import { clearNetworkBackoff, closeChannel, listReports, markReportsAuth, postKick, releaseSyncLease, requeueAuth, subscribe, takeSyncLease, updateReportSync, emit } from "./store";
+import { clearNetworkBackoff, closeChannel, evidenceDue, evidenceOf, listReports, markReportsAuth, needsAttention, postKick, releaseSyncLease, requeueAuth, subscribe, takeSyncLease, updateReportEvidence, updateReportSync, emit } from "./store";
 
 //the one worker that sends queued reports. module level, one scope at a time: startSync(scope) after login, stopSync()
 //on logout. a pass takes the cross tab lock, sends every due report by seq, releases the lock. nothing runs while the
@@ -16,12 +16,17 @@ export type SyncStatus = {
   running: boolean;
   auth_required: boolean;
   pending: number; //queued + syncing + auth
-  attention: number; //invalid + forbidden + conflict
+  attention: number; //invalid + forbidden + conflicts a manager has not reviewed yet
   last_sync_at: string | null;
   last_error: string | null;
 };
 
-export type Transport = { post: (url: string, body: any, token: string, timeoutMs: number) => Promise<{ status: number; data: any }> };
+//post sends a report or its evidence, get reads the review status. both resolve with any http status (never throw for one)
+//and throw for a network failure or a timeout
+export type Transport = {
+  post: (url: string, body: any, token: string, timeoutMs: number) => Promise<{ status: number; data: any }>;
+  get: (url: string, params: any, token: string, timeoutMs: number) => Promise<{ status: number; data: any }>;
+};
 export type SyncDeps = { transport?: Transport; now?: () => number; random?: () => number; afterSynced?: (scope: string) => void };
 export type KickReason = "enqueue" | "retry" | "online" | "visible" | "focus" | "channel" | "timer" | "start";
 
@@ -40,6 +45,10 @@ const bg = axios.create({ baseURL: "/api", timeout: REQUEST_TIMEOUT_MS });
 const defaultTransport: Transport = {
   async post(url, body, token, timeoutMs) {
     const r = await bg.post(url, body, { timeout: timeoutMs, headers: { Authorization: `Bearer ${token}` }, validateStatus: () => true });
+    return { status: r.status, data: r.data };
+  },
+  async get(url, params, token, timeoutMs) {
+    const r = await bg.get(url, { params, timeout: timeoutMs, headers: { Authorization: `Bearer ${token}` }, validateStatus: () => true });
     return { status: r.status, data: r.data };
   },
 };
@@ -171,6 +180,7 @@ export async function startSync(s: string, d: SyncDeps = {}): Promise<void> {
   for (const r of await listReports(s)) {
     if (gen !== generation) return;
     if (r.sync.state === ReportSyncState.syncing) await updateReportSync(s, r.operation_id, { state: ReportSyncState.queued });
+    if (r.sync.state === ReportSyncState.conflict && evidenceOf(r).state === EvidenceUploadState.uploading) await updateReportEvidence(s, r.operation_id, { state: EvidenceUploadState.pending });
   }
   if (gen !== generation) return;
   await requeueIfSameAccount(s);
@@ -295,6 +305,12 @@ function runPass(): Promise<void> {
           dirty = false;
           const stop = await processDue(gen, s, synced);
           if (stop || gen !== generation) break;
+          //the evidence of rejected reports rides in the same pass, after the reports: a failed upload never holds a
+          //delivery report back, and the reports of a task go out before its old conflict is described
+          if (await processEvidence(gen, s, synced)) break;
+          if (gen !== generation) break;
+          await fetchReviews(gen, s);
+          if (gen !== generation) break;
         } while (dirty);
       });
     } catch (e) {
@@ -449,10 +465,131 @@ async function retryLater(s: string, r: LocalReport, httpStatus: number | null, 
 
 /*──────────────────────────────────────────────────────────────────────────*/
 
+//sends the evidence of every rejected report that is due, one request each, by seq. the same credentials rule as the
+//reports: no token, someone else's or an expired one stops the pass without a request (the rows stay as they are, they
+//are not delivery reports and auth parks nothing here). the delivery report is never resent as a way of uploading
+//evidence: this route records, it does not apply. resolves true when the pass must stop
+async function processEvidence(gen: number, s: string, synced: { count: number }): Promise<boolean> {
+  const now = deps.now();
+  const due = (await listReports(s)).filter((r) => evidenceDue(r, now));
+  if (gen !== generation) return true;
+
+  for (const r of due) {
+    if (gen !== generation) return true;
+    if (r.scope !== s) continue;
+
+    const token = currentToken();
+    const jwt = decodeJwt(token);
+    if (!token || !jwt || jwt.sub !== r.user_id || !tokenIsFresh(token, deps.now())) {
+      await parkForAuth(s, token, null);
+      return true;
+    }
+
+    await updateReportEvidence(s, r.operation_id, { state: EvidenceUploadState.uploading });
+    if (gen !== generation) return true;
+    if (!webLocks()) await takeSyncLease(s, tabId, LEASE_MS, deps.now()).catch(() => {});
+
+    const body = { ...r.payload, operation_id: r.operation_id, issuance_revision: r.issuance_revision ?? undefined, client_reported_at: r.client_reported_at };
+    let res: { status: number; data: any };
+    try {
+      res = await deps.transport.post(`/delivery/tasks/${r.task_id}/conflicts`, body, token, REQUEST_TIMEOUT_MS);
+    } catch (e: any) {
+      if (gen !== generation) return true;
+      await retryEvidenceLater(s, r, null, e?.message || "network error");
+      setStatus({ reachable: false, last_error: e?.message || "network error" });
+      continue;
+    }
+    if (gen !== generation) return true;
+    setStatus({ reachable: true });
+
+    if (await classifyEvidence(s, r, res, synced)) return true;
+  }
+  return false;
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//the server's answer to an evidence upload. a receipt with kind conflict_recorded is the only thing that moves the row
+//to `received`; kind delivered means the operation had been applied after all and the report becomes synced with that
+//ack. 400 / 403 / 404 / 409 are kept as failed for attention (no automatic retry), the rest is retried. true = stop (401)
+async function classifyEvidence(s: string, r: LocalReport, res: { status: number; data: any }, synced: { count: number }): Promise<boolean> {
+  const { status: code, data } = res;
+  const message = typeof data?.message === "string" ? data.message : Array.isArray(data?.message) ? data.message.join(", ") : null;
+
+  if (code >= 200 && code < 300) {
+    if (data?.kind === "conflict_recorded" && typeof data.conflict_id === "number" && typeof data.received_at === "string") {
+      const receipt = data as IConflictReceipt;
+      const reviewed = receipt.review_status === ConflictReviewStatus.reviewed;
+      await updateReportEvidence(s, r.operation_id, { state: reviewed ? EvidenceUploadState.reviewed : EvidenceUploadState.received, next_at: null, last_error: null, http_status: code }, receipt);
+      return false;
+    }
+    if (data?.kind === "delivered" && typeof data.attempt_id === "number" && Object.values(AttemptOutcome).includes(data?.outcome)) {
+      //not a conflict after all: the first send had gone through and its 201 was lost on the way back
+      const { kind, ...ack } = data;
+      await updateReportSync(s, r.operation_id, { state: ReportSyncState.synced, next_at: null, last_error: null, http_status: code, conflict_code: null }, ack as IAttemptResult);
+      await updateReportEvidence(s, r.operation_id, { state: EvidenceUploadState.none, next_at: null, last_error: null });
+      synced.count++;
+      return false;
+    }
+    await retryEvidenceLater(s, r, code, "unreadable server answer");
+    return false;
+  }
+  if (code === 401) {
+    //back to pending: the row is not a delivery report, auth parks nothing here, a fresh login sends it again
+    await updateReportEvidence(s, r.operation_id, { state: EvidenceUploadState.pending, http_status: code, last_error: message });
+    await parkForAuth(s, currentToken(), message);
+    return true;
+  }
+  if (code === 400 || code === 403 || code === 404 || code === 409) {
+    const detail = code === 409 && typeof data?.code === "string" ? `${data.code}: ${message || ""}`.trim() : message || `http ${code}`;
+    await updateReportEvidence(s, r.operation_id, { state: EvidenceUploadState.failed, next_at: null, last_error: detail, http_status: code });
+    return false;
+  }
+  await retryEvidenceLater(s, r, code, message || `http ${code}`);
+  return false;
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//the same backoff as the reports, on the evidence axis
+async function retryEvidenceLater(s: string, r: LocalReport, httpStatus: number | null, error: string) {
+  const tries = evidenceOf(r).tries + 1;
+  const base = Math.min(BACKOFF_BASE_MS * 2 ** (tries - 1), BACKOFF_MAX_MS);
+  const wait = base + Math.floor(base * 0.3 * deps.random());
+  await updateReportEvidence(s, r.operation_id, { state: EvidenceUploadState.pending, tries, next_at: new Date(deps.now() + wait).toISOString(), last_error: error, http_status: httpStatus });
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//asks the server whether a manager reviewed the evidence this device uploaded. one request per pass for all the
+//received rows, under the same credentials rule, and nothing changes when the answer is not a clean list
+async function fetchReviews(gen: number, s: string) {
+  const received = (await listReports(s)).filter((r) => r.sync.state === ReportSyncState.conflict && evidenceOf(r).state === EvidenceUploadState.received);
+  if (!received.length || gen !== generation) return;
+  const token = currentToken();
+  const jwt = decodeJwt(token);
+  if (!token || !jwt || !tokenIsFresh(token, deps.now()) || received.some((r) => r.user_id !== jwt.sub)) return;
+
+  let res: { status: number; data: any };
+  try {
+    res = await deps.transport.get("/delivery/conflicts", { operation_ids: received.map((r) => r.operation_id).join(",") }, token, REQUEST_TIMEOUT_MS);
+  } catch (e) {
+    return;
+  }
+  if (gen !== generation || res.status < 200 || res.status >= 300 || !Array.isArray(res.data)) return;
+  for (const row of res.data as IConflictStatus[]) {
+    if (gen !== generation) return;
+    if (row?.review_status !== ConflictReviewStatus.reviewed || typeof row.operation_id !== "string") continue;
+    await updateReportEvidence(s, row.operation_id, { state: EvidenceUploadState.reviewed, reviewed_at: row.reviewed_at || new Date(deps.now()).toISOString() });
+  }
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
 async function refreshCounts(s: string) {
   const rows = await listReports(s);
   const pending = rows.filter((r) => [ReportSyncState.queued, ReportSyncState.syncing, ReportSyncState.auth].includes(r.sync.state)).length;
-  const attention = rows.filter((r) => [ReportSyncState.invalid, ReportSyncState.forbidden, ReportSyncState.conflict].includes(r.sync.state)).length;
+  const attention = rows.filter(needsAttention).length;
   //a parked row keeps the flag up even when it was set before this pass; a fresh login clears it in requeueIfSameAccount
   const auth_required = status.auth_required || rows.some((r) => r.sync.state === ReportSyncState.auth);
   if (scope === s) setStatus({ pending, attention, auth_required });
@@ -470,7 +607,7 @@ function scheduleTimer() {
   listReports(s)
     .then((rows) => {
       if (scope !== s || timer) return;
-      const queued = rows.some((r) => r.sync.state === ReportSyncState.queued);
+      const queued = rows.some((r) => r.sync.state === ReportSyncState.queued || (r.sync.state === ReportSyncState.conflict && evidenceOf(r).state === EvidenceUploadState.pending));
       if (!queued && status.reachable !== false) return;
       timer = setTimeout(() => {
         timer = null;

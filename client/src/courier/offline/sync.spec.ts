@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deleteDB } from "idb";
 
-import { AttemptOutcome, ReportConflictCode, ReportSyncState } from "../../../../shared/@core";
+import { AttemptOutcome, ConflictReviewStatus, EvidenceUploadState, ReportConflictCode, ReportSyncState } from "../../../../shared/@core";
 import { PNG, SCOPE, courierUser, deferred, fullForm, makeTask, setToken, snapshot, tick } from "../../test/fixtures";
 import { DB_NAME, closeDb, openCourierDb } from "./db";
-import { closeChannel, getReport, listReports, readBoard, refresh, retryReport, submitReport } from "./store";
+import { closeChannel, evidenceOf, getReport, listReports, readBoard, refresh, retryEvidence, retryReport, submitReport, updateReportSync } from "./store";
 import { SyncStatus, Transport, getSyncStatus, kickSync, resetSyncForTests, startSync, stopSync, subscribeSync } from "./sync";
 
 //the worker against a fake transport: what goes out, how every answer is classified, what a reconnect and a re-login do
@@ -21,19 +21,32 @@ function ok(task_id: number) {
 
 /*──────────────────────────────────────────────────────────────────────────*/
 
+let conflictId = 500;
+//the receipt of POST .../conflicts, the default answer for an evidence upload
+function receipt(url: string, body: any) {
+  conflictId++;
+  return { status: 201, data: { kind: "conflict_recorded", conflict_id: conflictId, operation_id: body.operation_id, task_id: Number(url.split("/")[3]), received_at: "2026-09-28T10:00:07.000Z", review_status: ConflictReviewStatus.pending, reviewed_at: null } };
+}
+
 //a transport whose answers the test scripts per call: a status number, a full { status, data }, an Error to throw, or a
-//promise to hold the request in flight
-function fakeTransport(script: any[] = []) {
+//promise to hold the request in flight. `getScript` does the same for the review status reads (default: an empty list)
+function fakeTransport(script: any[] = [], getScript: any[] = []) {
   const calls: { url: string; body: any; token: string }[] = [];
   const post = vi.fn(async (url: string, body: any, token: string) => {
     calls.push({ url, body, token });
-    const next = script.length ? script.shift() : ok(body.__task ?? Number(url.split("/")[3]));
+    const next = script.length ? script.shift() : url.endsWith("/conflicts") ? receipt(url, body) : ok(body.__task ?? Number(url.split("/")[3]));
     const answer = typeof next === "function" ? next(url, body) : next;
     if (answer instanceof Error) throw answer;
     if (typeof answer === "number") return answer === 201 ? ok(Number(url.split("/")[3])) : { status: answer, data: { statusCode: answer, message: `http ${answer}` } };
     return answer;
   });
-  return { post, calls, transport: { post } as Transport };
+  const get = vi.fn(async (url: string, params: any, token: string) => {
+    const next = getScript.length ? getScript.shift() : { status: 200, data: [] };
+    const answer = typeof next === "function" ? next(url, params) : next;
+    if (answer instanceof Error) throw answer;
+    return answer;
+  });
+  return { post, get, calls, transport: { post, get } as Transport };
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/
@@ -45,6 +58,7 @@ beforeEach(async () => {
   localStorage.clear();
   setToken({ sub: 7, exp: freshExp });
   attemptId = 0;
+  conflictId = 500;
 });
 
 afterEach(async () => {
@@ -236,11 +250,13 @@ describe("sync worker", () => {
 
   it("a 409 becomes a conflict with the server's code and the other task's report still goes out", async () => {
     const { reports } = await seed([1, 2]);
-    const { post, transport } = fakeTransport([{ status: 409, data: { statusCode: 409, message: "task is no longer open", code: ReportConflictCode.task_cancelled } }]);
+    const { post, calls, transport } = fakeTransport([{ status: 409, data: { statusCode: 409, message: "task is no longer open", code: ReportConflictCode.task_cancelled } }]);
     const afterSynced = vi.fn();
     await startSync(SCOPE, { transport, now, random: () => 0, afterSynced });
 
-    expect(post).toHaveBeenCalledTimes(2);
+    //two reports, then the evidence of the refused one goes out in the same pass
+    expect(post).toHaveBeenCalledTimes(3);
+    expect(calls[2].url).toBe("/delivery/tasks/1/conflicts");
     const [a, b] = await Promise.all(reports.map((r) => getReport(SCOPE, r.operation_id)));
     expect(a.sync).toMatchObject({ state: ReportSyncState.conflict, conflict_code: ReportConflictCode.task_cancelled, last_error: "task is no longer open", http_status: 409, next_at: null });
     expect(a.ack).toBeNull();
@@ -255,14 +271,15 @@ describe("sync worker", () => {
     expect(board.rows.find((r) => r.id === 1).local_report.conflict_code).toBe(ReportConflictCode.task_cancelled);
     expect(await retryReport(SCOPE, a.operation_id)).toBe(false);
     await kickSync("retry");
-    expect(post).toHaveBeenCalledTimes(2);
+    expect(post).toHaveBeenCalledTimes(3);
   });
 
   it("a conflict survives a stop and a same account start, a refresh that lost its task, and is never resent", async () => {
     const { reports } = await seed([1]);
     const { post, transport } = fakeTransport([{ status: 409, data: { statusCode: 409, message: "task is no longer open", code: ReportConflictCode.task_closed } }]);
     await startSync(SCOPE, { transport, now, random: () => 0 });
-    expect(post).toHaveBeenCalledTimes(1);
+    //the refused report and its evidence, nothing else ever again
+    expect(post).toHaveBeenCalledTimes(2);
     expect((await getReport(SCOPE, reports[0].operation_id)).sync.state).toBe(ReportSyncState.conflict);
 
     //logout stops the worker, the login of the same account starts it again with a new token: a permanent state is not
@@ -273,7 +290,7 @@ describe("sync worker", () => {
     await kickSync("online");
     expect(await retryReport(SCOPE, reports[0].operation_id)).toBe(false);
     await kickSync("retry");
-    expect(post).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledTimes(2);
 
     //the task left the server list (the other device closed it, the manager handled the issuance): the evidence stays as
     //it was signed, under its original task id, and the board counts it for attention
@@ -297,7 +314,8 @@ describe("sync worker", () => {
       404,
     ]);
     await startSync(SCOPE, { transport, now, random: () => 0 });
-    expect(post).toHaveBeenCalledTimes(4);
+    //four reports, then the evidence of the one refused with a 409
+    expect(post).toHaveBeenCalledTimes(5);
     const rows = await Promise.all(reports.map((r) => getReport(SCOPE, r.operation_id)));
     expect(rows[0].sync).toMatchObject({ state: ReportSyncState.conflict, conflict_code: ReportConflictCode.task_closed, last_error: "task already closed" });
     expect(rows[1].sync).toMatchObject({ state: ReportSyncState.invalid, last_error: "expected 2 item answers, got 1", http_status: 400 });
@@ -402,5 +420,130 @@ describe("sync worker", () => {
       other.close();
       delete (navigator as any).locks;
     }
+  });
+});
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//the evidence of a rejected report: sent once after the 409, kept with its receipt, never resent as a delivery report
+describe("evidence of rejected reports", () => {
+  const rejected = { status: 409, data: { statusCode: 409, message: "task is no longer open", code: ReportConflictCode.task_closed } };
+
+  it("uploads the evidence in the same pass as the 409, keeps the receipt, and reads the review later", async () => {
+    const { reports } = await seed([1, 2]);
+    const reviewedAt = "2026-09-28T12:00:00.000Z";
+    const { post, get, calls, transport } = fakeTransport([rejected], [{ status: 200, data: [] }, { status: 200, data: [{ operation_id: reports[0].operation_id, conflict_id: 501, received_at: "2026-09-28T10:00:07.000Z", review_status: ConflictReviewStatus.reviewed, reviewed_at: reviewedAt }] }]);
+    await startSync(SCOPE, { transport, now, random: () => 0 });
+
+    //report 1 refused, report 2 delivered, then the evidence of report 1: three requests, the last one to the conflicts route
+    expect(post).toHaveBeenCalledTimes(3);
+    expect(calls[2].url).toBe("/delivery/tasks/1/conflicts");
+    expect(calls[2].body).toMatchObject({ operation_id: reports[0].operation_id, issuance_revision: 4, client_reported_at: reports[0].client_reported_at, signature_png: PNG });
+    let r = await getReport(SCOPE, reports[0].operation_id);
+    expect(r.sync.state).toBe(ReportSyncState.conflict);
+    expect(evidenceOf(r)).toMatchObject({ state: EvidenceUploadState.received, conflict_id: 501, received_at: "2026-09-28T10:00:07.000Z", tries: 0 });
+    expect(r.payload).toEqual(reports[0].payload);
+    expect(getSyncStatus()).toMatchObject({ pending: 0, attention: 1 });
+    //the first review read happened in that pass and said pending
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(get.mock.calls[0][1]).toEqual({ operation_ids: reports[0].operation_id });
+
+    //the next pass learns the manager marked it reviewed: no longer attention, the delivery state untouched
+    await kickSync("focus");
+    expect(get).toHaveBeenCalledTimes(2);
+    r = await getReport(SCOPE, reports[0].operation_id);
+    expect(evidenceOf(r)).toMatchObject({ state: EvidenceUploadState.reviewed, reviewed_at: reviewedAt });
+    expect(r.sync.state).toBe(ReportSyncState.conflict);
+    expect(getSyncStatus()).toMatchObject({ pending: 0, attention: 0 });
+    expect(post).toHaveBeenCalledTimes(3);
+  });
+
+  it("a conflict stored before the evidence field existed is uploaded on the next start", async () => {
+    const { reports } = await seed([1]);
+    //what a device carries from before this version: the conflict, no `evidence` at all
+    await updateReportSync(SCOPE, reports[0].operation_id, { state: ReportSyncState.conflict, conflict_code: ReportConflictCode.task_cancelled, http_status: 409 });
+    expect((await getReport(SCOPE, reports[0].operation_id)).evidence).toBeUndefined();
+
+    const { post, calls, transport } = fakeTransport();
+    await startSync(SCOPE, { transport, now, random: () => 0 });
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(calls[0].url).toBe("/delivery/tasks/1/conflicts");
+    expect(evidenceOf(await getReport(SCOPE, reports[0].operation_id)).state).toBe(EvidenceUploadState.received);
+  });
+
+  it("a lost upload response is retried with the same operation id and lands on the same receipt", async () => {
+    const { reports } = await seed([1]);
+    const { post, calls, transport } = fakeTransport([rejected, new Error("Network Error")]);
+    await startSync(SCOPE, { transport, now, random: () => 0 });
+    let e = evidenceOf(await getReport(SCOPE, reports[0].operation_id));
+    expect(e).toMatchObject({ state: EvidenceUploadState.pending, tries: 1, http_status: null, next_at: new Date(T + 30_000).toISOString() });
+
+    window.dispatchEvent(new Event("online"));
+    await vi.waitFor(() => expect(post).toHaveBeenCalledTimes(3));
+    await vi.waitFor(async () => expect(evidenceOf(await getReport(SCOPE, reports[0].operation_id)).state).toBe(EvidenceUploadState.received));
+    expect(calls[1].body.operation_id).toBe(calls[2].body.operation_id);
+    e = evidenceOf(await getReport(SCOPE, reports[0].operation_id));
+    expect(e.next_at).toBeNull();
+  });
+
+  it("a 401 pauses the upload without losing anything; the same account's new token sends it", async () => {
+    const { reports } = await seed([1]);
+    const { post, transport } = fakeTransport([rejected, 401]);
+    await startSync(SCOPE, { transport, now, random: () => 0 });
+    expect(getSyncStatus().auth_required).toBe(true);
+    let r = await getReport(SCOPE, reports[0].operation_id);
+    expect(r.sync.state).toBe(ReportSyncState.conflict);
+    expect(evidenceOf(r).state).toBe(EvidenceUploadState.pending);
+    expect(r.payload.signature_png).toBe(PNG);
+
+    stopSync();
+    setToken({ sub: 7, exp: freshExp + 60 });
+    await startSync(SCOPE, { transport, now, random: () => 0 });
+    expect(post).toHaveBeenCalledTimes(3);
+    expect(evidenceOf(await getReport(SCOPE, reports[0].operation_id)).state).toBe(EvidenceUploadState.received);
+  });
+
+  it("another account's token sends nothing, and a refused upload does not block the next delivery report", async () => {
+    const { reports, tasks } = await seed([1]);
+    await updateReportSync(SCOPE, reports[0].operation_id, { state: ReportSyncState.conflict, conflict_code: ReportConflictCode.task_closed, http_status: 409 });
+    setToken({ sub: 8, courier_id: 4 });
+    const { post, transport } = fakeTransport([400]);
+    await startSync(SCOPE, { transport, now, random: () => 0 });
+    expect(post).not.toHaveBeenCalled();
+    expect(evidenceOf(await getReport(SCOPE, reports[0].operation_id)).state).toBe(EvidenceUploadState.none);
+
+    //the right account: the server refuses the evidence (400) and the row stays for attention, retryable by hand only
+    setToken({ sub: 7, courier_id: 3 });
+    await kickSync("online");
+    expect(post).toHaveBeenCalledTimes(1);
+    let e = evidenceOf(await getReport(SCOPE, reports[0].operation_id));
+    expect(e).toMatchObject({ state: EvidenceUploadState.failed, http_status: 400 });
+    await kickSync("timer");
+    expect(post).toHaveBeenCalledTimes(1);
+
+    //a new report of another task still goes out, then the manual retry sends the evidence again
+    const t3 = makeTask(3, { revision: 4 });
+    await refresh(SCOPE, async () => snapshot([...tasks, t3]));
+    const third = await submitReport(SCOPE, courierUser, t3, fullForm(t3));
+    await vi.waitFor(async () => expect((await getReport(SCOPE, third.operation_id)).sync.state).toBe(ReportSyncState.synced));
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(await retryEvidence(SCOPE, reports[0].operation_id)).toBe(true);
+    await kickSync("retry");
+    expect(post).toHaveBeenCalledTimes(3);
+    e = evidenceOf(await getReport(SCOPE, reports[0].operation_id));
+    expect(e.state).toBe(EvidenceUploadState.received);
+  });
+
+  it("a receipt of kind delivered turns the report into a synced one instead of a conflict", async () => {
+    const { reports } = await seed([1]);
+    const delivered = { status: 201, data: { kind: "delivered", attempt_id: 77, outcome: AttemptOutcome.delivered, task_id: 1, reported_at: "2026-09-28T09:59:00.000Z", operation_id: reports[0].operation_id, replayed: true } };
+    const { post, transport } = fakeTransport([rejected, delivered]);
+    await startSync(SCOPE, { transport, now, random: () => 0 });
+    expect(post).toHaveBeenCalledTimes(2);
+    const r = await getReport(SCOPE, reports[0].operation_id);
+    expect(r.sync.state).toBe(ReportSyncState.synced);
+    expect(r.ack).toMatchObject({ attempt_id: 77, outcome: AttemptOutcome.delivered });
+    expect(evidenceOf(r).state).toBe(EvidenceUploadState.none);
+    expect(getSyncStatus()).toMatchObject({ pending: 0, attention: 0 });
   });
 });

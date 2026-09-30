@@ -103,6 +103,9 @@ export class DeliveryService {
     const task = await this.myTask(user, id); //also proves the task belongs to this courier
     const operationId = validateOperationId(body?.operation_id);
     const issuanceRevision = validateIssuanceRevision(body?.issuance_revision);
+    //an offline operation without the revision it was written against would skip the concurrency token by omission.
+    //only the legacy request (no operation id at all) may leave it out, and that one is decided by the task state alone
+    if (operationId && issuanceRevision == null) throw new BadRequestException('issuance_revision is required with operation_id');
     //the legacy early exit, only without an operation id: with one, a closed task may be the replay of the report that
     //closed it, and that is decided under the lock below
     if (!operationId && task.status !== TaskStatus.pending) throw conflict('task already closed', ReportConflictCode.task_closed);

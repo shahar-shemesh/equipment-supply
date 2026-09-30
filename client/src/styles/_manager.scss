@@ -948,3 +948,70 @@
         font-size: 56px !important;
     }
 }
+
+// דוחות לבדיקה (ConflictsPage.tsx): the board's table skin, a row opens the dialog
+.conflicts-page {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+
+    &__intro {
+        margin: 0;
+        max-width: 720px;
+    }
+
+    // the courier board's pill (.segmented in _courier.scss), two segments
+    &__tabs {
+        max-width: 420px;
+    }
+
+    &__row {
+        cursor: pointer;
+    }
+
+    .col-actions {
+        width: 80px;
+        white-space: nowrap;
+    }
+}
+
+// the rejected report next to the server's state then and now (ConflictDetailDialog.tsx)
+.conflict-dialog {
+    &__meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 24px;
+        margin-bottom: 12px;
+    }
+
+    &__chips {
+        margin-bottom: 8px;
+    }
+
+    &__states {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+
+        @include bp.phone {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    &__review {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+
+        label {
+            font-weight: 500;
+        }
+    }
+
+    &__note {
+        white-space: pre-wrap;
+        background: var(--color-surface-2);
+        border-radius: 8px;
+        padding: 12px;
+    }
+}

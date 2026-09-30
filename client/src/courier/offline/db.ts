@@ -1,6 +1,6 @@
 import { IDBPDatabase, openDB } from "idb";
 
-import { AttemptOutcome, IAttemptPayload, IAttemptResult, IDeliveryTask, RecipientType, ReportConflictCode, ReportSyncState } from "../../../../shared/@core";
+import { AttemptOutcome, EvidenceUploadState, IAttemptPayload, IAttemptResult, IDeliveryTask, RecipientType, ReportConflictCode, ReportSyncState } from "../../../../shared/@core";
 
 //the courier's local database. one database for the device, every row carries the scope (users.id:couriers.id) in its
 //key so an account never reads another account's rows. four kinds of data live here and never mix:
@@ -80,6 +80,21 @@ export type LocalReport = {
   client_reported_at: string;
   sync: ReportSync;
   ack: IAttemptResult | null;
+  //the evidence axis of a rejected report (sync.state stays `conflict`): whether the signed report reached the server for
+  //the manager to look at. rows written before this field existed have none; evidenceOf() reads them as "none"
+  evidence?: ReportEvidence;
+};
+
+export type ReportEvidence = {
+  state: EvidenceUploadState;
+  tries: number;
+  next_at: string | null;
+  last_error: string | null;
+  http_status: number | null;
+  conflict_id: number | null; //delivery_conflicts.id from the receipt
+  received_at: string | null; //server clock, from the receipt
+  reviewed_at: string | null;
+  updated_at: string;
 };
 
 /*──────────────────────────────────────────────────────────────────────────*/

@@ -4,16 +4,17 @@ import { useTranslation } from "react-i18next";
 import { Alert, Button, CircularProgress } from "@mui/material";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 
-import { IssuanceStatus, ReportSyncState } from "../../../../shared/@core";
+import { EvidenceUploadState, IssuanceStatus, ReportSyncState } from "../../../../shared/@core";
 import { reasonKeys } from "../../../../shared/@utils";
 import { StatusBadge } from "../../components/StatusBadge";
 import { useAuth } from "../../utils/auth";
 import { displayNumber, formatDateTime } from "../../utils/format";
 import { scopeOf } from "../offline/identity";
-import { retryReport } from "../offline/store";
+import { evidenceOf, retryReport } from "../offline/store";
 import { kickSync } from "../offline/sync";
 import { useReports, useTask } from "../offline/useCourierData";
 import { SyncChip } from "../components/SyncChip";
+import { EvidenceLine } from "../components/EvidenceLine";
 
 //the preserved report, read only: what the courier signed, as it was saved on this device, whatever the server said
 //about it since. this is the page the courier shows the manager when a report was rejected, the manager never gets it
@@ -53,6 +54,8 @@ export default function ReportDetailPage() {
   const d = report.display;
   const s = report.sync;
   const taskGone = !!taskData && !taskData.task;
+  //once the server holds the evidence the manager can see it, the notice must not say otherwise
+  const kept = [EvidenceUploadState.received, EvidenceUploadState.reviewed].includes(evidenceOf(report).state);
   const retryable = s.state === ReportSyncState.queued || s.state === ReportSyncState.auth;
 
   return (
@@ -60,7 +63,7 @@ export default function ReportDetailPage() {
       <Link to="/courier" className="task-detail__back"><ChevronLeftIcon fontSize="small" /> {t("back")}</Link>
       <h1>{t("sync_report_of", { number: displayNumber(d as any) })}</h1>
 
-      {taskGone && <Alert severity="warning">{t("sync_report_task_gone")}</Alert>}
+      {taskGone && <Alert severity="warning">{t(kept ? "sync_report_task_gone_kept" : "sync_report_task_gone")}</Alert>}
 
       <section className="task-section report-detail__sync">
         <div className="report-detail__chips">
@@ -71,6 +74,7 @@ export default function ReportDetailPage() {
         {report.ack && <div className="muted small">{t("sync_received_at", { time: formatDateTime(report.ack.reported_at) })}</div>}
         {s.state === ReportSyncState.queued && s.next_at && <div className="muted small">{t("sync_next_try", { time: formatDateTime(s.next_at) })}</div>}
         {s.state === ReportSyncState.conflict && s.conflict_code && <Alert severity="warning" icon={false}>{t(`conflict_${s.conflict_code}`)}</Alert>}
+        <EvidenceLine report={report} scope={scope} />
         {s.last_error && s.state !== ReportSyncState.synced && <div className="report-detail__error small">{t("sync_last_error", { error: s.last_error })}</div>}
         {retryable && <Button variant="outlined" disabled={busy} onClick={retry}>{t("sync_retry")}</Button>}
       </section>

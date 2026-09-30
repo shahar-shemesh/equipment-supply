@@ -1,7 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
 import { createHash } from 'crypto';
 
-import { ItemAnswer, Recipient } from './attempt.validation';
+import { NonDeliveryReason } from '../../../shared/@core';
+import { DETAILS_MAX, ItemAnswer, Recipient } from './attempt.validation';
 
 //the offline queue on the tablet sends every report with an operation id, and the same id again after a lost response.
 //everything that decides "is this the same report" lives here, the transaction in delivery.service only asks
@@ -57,4 +58,44 @@ export function payloadHash(data: { task_id: number; recipient: Recipient; signa
 //postgres 23505 on our unique index. QueryFailedError copies the driver props, so code and constraint are on the error itself
 export function isOperationUniqueViolation(e: any) {
   return e?.code === '23505' && e?.constraint === OPERATION_UNIQUE_INDEX;
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+export const CONFLICT_UNIQUE_INDEX = 'UQ_delivery_conflicts_user_operation';
+
+export function isConflictUniqueViolation(e: any) {
+  return e?.code === '23505' && e?.constraint === CONFLICT_UNIQUE_INDEX;
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//the answers of a rejected report, kept as evidence: the same per line rules as validateItemAnswers (a real boolean, a
+//reason from the list plus details only on a "not delivered" line) but WITHOUT matching them to the issuance's current
+//lines. the report was signed against the lines of that moment, and the manager may have changed the issuance since;
+//the item ids are kept as submitted. the normalized shape is the one payloadHash hashes for a delivery attempt, so the
+//same report hashes the same on both routes
+export function validateEvidenceItems(raw: any): ItemAnswer[] {
+  if (!Array.isArray(raw) || !raw.length) throw new BadRequestException('items must be a non empty array');
+  if (raw.length > 100) throw new BadRequestException('too many item answers');
+  const seen = new Set<number>();
+  const answers: ItemAnswer[] = [];
+  for (const a of raw) {
+    if (!a || typeof a !== 'object') throw new BadRequestException('item answer must be an object');
+    const id = Number(a.item_id);
+    if (!Number.isInteger(id) || id <= 0) throw new BadRequestException(`bad item id ${a.item_id}`);
+    if (seen.has(id)) throw new BadRequestException(`duplicate answer for item ${id}`);
+    seen.add(id);
+    if (typeof a.delivered !== 'boolean') throw new BadRequestException(`delivered must be true or false for item ${id}`);
+    if (a.delivered) {
+      answers.push({ item_id: id, delivered: true, reason: null, reason_details: null });
+      continue;
+    }
+    if (!Object.values(NonDeliveryReason).includes(a.reason)) throw new BadRequestException(`unknown reason for item ${id}`);
+    const details = typeof a.reason_details === 'string' ? a.reason_details.trim() : '';
+    if (!details) throw new BadRequestException(`reason details are required for item ${id}`);
+    if (details.length > DETAILS_MAX) throw new BadRequestException(`reason details for item ${id} are longer than ${DETAILS_MAX} chars`);
+    answers.push({ item_id: id, delivered: false, reason: a.reason, reason_details: details });
+  }
+  return answers;
 }

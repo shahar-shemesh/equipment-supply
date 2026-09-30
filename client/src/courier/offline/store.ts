@@ -1,6 +1,6 @@
-import { AttemptOutcome, IAttemptResult, IDeliveryAttempt, IDeliveryTask, IUser, RecipientType, ReportConflictCode, ReportSyncState, TaskStatus } from "../../../../shared/@core";
+import { AttemptOutcome, EvidenceUploadState, IAttemptResult, IConflictReceipt, IDeliveryAttempt, IDeliveryTask, IUser, RecipientType, ReportConflictCode, ReportSyncState, TaskStatus } from "../../../../shared/@core";
 import { compareTasksForBoard, normalizeSapNumber } from "../../../../shared/@utils";
-import { DraftRow, LocalReport, MetaRow, ReportSync, TaskDetailRow, TaskRow, openCourierDb, scopeRange, storageError, writeTx } from "./db";
+import { DraftRow, LocalReport, MetaRow, ReportEvidence, ReportSync, TaskDetailRow, TaskRow, openCourierDb, scopeRange, storageError, writeTx } from "./db";
 import { newOperationId } from "./uuid";
 import { tokenMatchesScope } from "./identity";
 import { kickSync, noteBackgroundResult, offlineGet } from "./sync";
@@ -30,6 +30,32 @@ const PENDING_STATES = [ReportSyncState.queued, ReportSyncState.syncing, ReportS
 //true for queued / syncing / synced / auth: the report may still reach (or has reached) the server, so it owns the task
 export function isActiveState(state: ReportSyncState) {
   return ACTIVE_STATES.includes(state);
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//the evidence axis of a report, "none" for rows written before it existed (they are uploaded like any other conflict)
+export function evidenceOf(r: LocalReport): ReportEvidence {
+  return r.evidence || { state: EvidenceUploadState.none, tries: 0, next_at: null, last_error: null, http_status: null, conflict_id: null, received_at: null, reviewed_at: null, updated_at: r.sync.updated_at };
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//a rejected report the manager still has not seen: attention until a manager marks it reviewed. invalid / forbidden
+//reports (the server never took them as evidence) stay attention for good
+export function needsAttention(r: LocalReport) {
+  if (r.sync.state === ReportSyncState.invalid || r.sync.state === ReportSyncState.forbidden) return true;
+  return r.sync.state === ReportSyncState.conflict && evidenceOf(r).state !== EvidenceUploadState.reviewed;
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//a conflict whose evidence the worker should send: not sent yet, or a retryable failure whose backoff passed
+export function evidenceDue(r: LocalReport, now: number) {
+  if (r.sync.state !== ReportSyncState.conflict) return false;
+  const e = evidenceOf(r);
+  if (e.state !== EvidenceUploadState.none && e.state !== EvidenceUploadState.pending) return false;
+  return !e.next_at || Date.parse(e.next_at) <= now;
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/
@@ -542,11 +568,49 @@ export async function markReportsAuth(scope: string): Promise<number> {
 
 /*──────────────────────────────────────────────────────────────────────────*/
 
+//the worker's write on the evidence axis: merges `patch` into report.evidence. business content and `sync` are never
+//touched here. a `receipt` (kind conflict_recorded) fills the server ids. resolves with the updated report or null
+export async function updateReportEvidence(scope: string, operationId: string, patch: Partial<ReportEvidence>, receipt?: IConflictReceipt): Promise<LocalReport | null> {
+  assertScope(scope);
+  const updated = await writeTx(["reports"], async (tx) => {
+    const store = tx.objectStore("reports");
+    const r = (await store.get([scope, operationId])) as LocalReport | undefined;
+    if (!r) return null;
+    const base = evidenceOf(r);
+    const fromReceipt: Partial<ReportEvidence> = receipt ? { conflict_id: receipt.conflict_id, received_at: receipt.received_at, reviewed_at: receipt.reviewed_at || null } : {};
+    const next: LocalReport = { ...r, evidence: { ...base, ...fromReceipt, ...patch, updated_at: new Date().toISOString() } };
+    await store.put(next);
+    return next;
+  });
+  emit("reports", scope);
+  return updated;
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//the courier's "שליחה חוזרת לבדיקה": a failed or waiting evidence upload goes out again on the next pass. the delivery
+//report itself is not retried, its state stays `conflict`
+export async function retryEvidence(scope: string, operationId: string): Promise<boolean> {
+  const r = await getReport(scope, operationId);
+  if (!r || r.sync.state !== ReportSyncState.conflict) return false;
+  const e = evidenceOf(r);
+  if (e.state === EvidenceUploadState.received || e.state === EvidenceUploadState.reviewed || e.state === EvidenceUploadState.uploading) return false;
+  await updateReportEvidence(scope, operationId, { state: EvidenceUploadState.pending, next_at: null, tries: 0 });
+  return true;
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
 //a reconnect (online / focus / manual) drops the backoff of rows whose last failure was a network error, so they go out
-//right away. rows the server answered keep their schedule
+//right away. rows the server answered keep their schedule. the evidence axis follows the same rule
 export async function clearNetworkBackoff(scope: string): Promise<number> {
   let n = 0;
   for (const r of await listReports(scope)) {
+    const e = evidenceOf(r);
+    if (r.sync.state === ReportSyncState.conflict && e.state === EvidenceUploadState.pending && e.next_at && e.http_status === null) {
+      await updateReportEvidence(scope, r.operation_id, { next_at: null });
+      n++;
+    }
     if (r.sync.state !== ReportSyncState.queued || !r.sync.next_at || r.sync.http_status !== null) continue;
     await updateReportSync(scope, r.operation_id, { next_at: null });
     n++;

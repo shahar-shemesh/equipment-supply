@@ -68,6 +68,24 @@ export enum ReportConflictCode {
   issuance_not_assigned = "issuance_not_assigned",
   revision_changed = "revision_changed", //the issuance changed materially since the snapshot the report was written on
   operation_reused = "operation_reused", //same operation id, different content
+  not_a_conflict = "not_a_conflict", //only from POST .../conflicts: the report could still be applied, so nothing is recorded as evidence
+}
+
+// where the evidence of a rejected report stands: on the device only, on its way, kept on the server for the manager,
+// or looked at by the manager. never a delivery state: a reviewed report was still not applied
+export enum ConflictReviewStatus {
+  pending = "pending",
+  reviewed = "reviewed",
+}
+
+// client side axis of a rejected report, next to ReportSyncState (which stays `conflict` the whole time)
+export enum EvidenceUploadState {
+  none = "none", //saved only on this device (rows written before the evidence upload existed look like this)
+  pending = "pending", //waiting to send for manager review
+  uploading = "uploading",
+  received = "received", //the server acknowledged the evidence, the manager can see it
+  reviewed = "reviewed", //a manager marked it reviewed. the delivery report was not applied
+  failed = "failed", //the server refused the evidence upload (400 / 403 / 404 / 409), kept for attention
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/
@@ -205,6 +223,70 @@ export interface IAttemptResult {
   reported_at: string;
   operation_id?: string;
   replayed?: boolean; //the server already had this operation and returned the stored result
+}
+
+// what POST /api/delivery/tasks/:id/conflicts answers when the rejected report was kept as evidence. `kind` tells it
+// apart from an IAttemptResult: the same route answers { kind: "delivered", ...IAttemptResult } when that operation had
+// in fact been applied, so a device that lost the first response never files a false conflict
+export interface IConflictReceipt {
+  kind: "conflict_recorded";
+  conflict_id: number;
+  operation_id: string;
+  task_id: number;
+  received_at: string;
+  review_status: ConflictReviewStatus;
+  reviewed_at?: string | null;
+  replayed?: boolean;
+}
+
+// the authoritative state the server saw when it recorded the evidence, frozen with it
+export interface IConflictObserved {
+  task_status: TaskStatus;
+  issuance_status: IssuanceStatus;
+  issuance_revision: number;
+  current_task_id: number | null; //the open task of the issuance at that moment, if any
+  current_courier_id: number | null;
+  attempt_id: number | null; //the attempt that closed the rejected report's task, if any
+}
+
+// a rejected report kept on the server (delivery_conflicts). the submitted content never changes after the insert;
+// review_* are the manager's administrative acknowledgment and change nothing about the delivery
+export interface IDeliveryConflict {
+  id: number;
+  operation_id: string;
+  user_id: number;
+  courier_id: number;
+  task_id: number;
+  issuance_id: number;
+  submitted_revision?: number | null;
+  recipient_type: RecipientType;
+  recipient_name?: string;
+  recipient_id_number?: string;
+  recipient_phone?: string;
+  items: IDeliveryAttemptItem[];
+  signature_png?: string; //only in the detail response
+  rejection_code: ReportConflictCode;
+  rejection_message?: string;
+  observed: IConflictObserved;
+  client_reported_at?: string | null;
+  received_at: string;
+  review_status: ConflictReviewStatus;
+  reviewed_by?: number | null;
+  reviewed_by_name?: string | null;
+  reviewed_at?: string | null;
+  review_note?: string | null;
+  review_version: number; //optimistic token of the review action, sent back with POST .../review
+  courier?: ICourier;
+  issuance?: IIssuance;
+}
+
+// GET /api/delivery/conflicts?operation_ids= for the courier: the review status of their own evidence
+export interface IConflictStatus {
+  operation_id: string;
+  conflict_id: number;
+  received_at: string;
+  review_status: ConflictReviewStatus;
+  reviewed_at?: string | null;
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/

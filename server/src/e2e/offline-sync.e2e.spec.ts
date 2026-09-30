@@ -71,7 +71,7 @@ const OTHER_SIGNATURE = 'data:image/png;base64,' + Buffer.from([0x89, 0x50, 0x4e
 
 //one manager, two couriers with a login, each with one assigned issuance. the first issuance has two lines
 async function fixture(): Promise<Fixture> {
-    await ds.query('TRUNCATE TABLE delivery_operations, delivery_attempt_items, delivery_attempts, delivery_tasks, issuance_items, issuances, couriers, users RESTART IDENTITY CASCADE');
+    await ds.query('TRUNCATE TABLE delivery_conflicts, delivery_operations, delivery_attempt_items, delivery_attempts, delivery_tasks, issuance_items, issuances, couriers, users RESTART IDENTITY CASCADE');
     const hash = await bcrypt.hash('1234', 4);
 
     await ds.getRepository(User).save({ username: 'm', password_hash: hash, display_name: 'manager', role: UserRole.manager });
@@ -187,11 +187,13 @@ describe('report with an operation id', () => {
         const f = await fixture();
         expect((await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, { ...allDelivered(f), operation_id: OP_A, issuance_revision: '1' })).status).toBe(400);
         expect((await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, { ...allDelivered(f), operation_id: OP_A, issuance_revision: 1.5 })).status).toBe(400);
+        //an offline operation may not skip the concurrency token by leaving it out, only the legacy request (no id) may
+        expect((await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, { ...allDelivered(f), operation_id: OP_A })).status).toBe(400);
         expect((await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, { ...allDelivered(f), operation_id: 'short' })).status).toBe(400);
         expect(await state(f.issuance.id)).toMatchObject({ pending: 1, attempts: 0, operations: 0, revision: 1 });
 
         //Date.parse('1') is a real date in v8, the strict parser must not keep it
-        const res = await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, { ...allDelivered(f), operation_id: OP_A, client_reported_at: '1' });
+        const res = await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, { ...allDelivered(f), operation_id: OP_A, issuance_revision: 1, client_reported_at: '1' });
         expect(res.status).toBe(201);
         const attempt = await ds.getRepository(DeliveryAttempt).findOne({ where: { id: res.body.attempt_id } });
         expect(attempt.client_reported_at).toBeNull();
@@ -216,7 +218,7 @@ describe('replay', () => {
     it('two concurrent identical requests: both 201 with the same attempt, exactly one attempt', async () => {
         for (let round = 0; round < 3; round++) {
             const f = await fixture();
-            const body = { ...allDelivered(f), operation_id: OP_A };
+            const body = { ...allDelivered(f), operation_id: OP_A, issuance_revision: 1 };
             const [a, b] = await Promise.all([
                 post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, body),
                 post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, body),
@@ -256,9 +258,9 @@ describe('replay', () => {
 
     it('the same operation id with different content is refused', async () => {
         const f = await fixture();
-        expect((await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, { ...allDelivered(f), operation_id: OP_A })).status).toBe(201);
+        expect((await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, { ...allDelivered(f), operation_id: OP_A, issuance_revision: 1 })).status).toBe(201);
 
-        const reused = await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, { ...noneDelivered(f), operation_id: OP_A });
+        const reused = await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, { ...noneDelivered(f), operation_id: OP_A, issuance_revision: 1 });
         expect(reused.status).toBe(409);
         expect(reused.body).toEqual({ statusCode: 409, message: 'operation id was already used with different content', code: ReportConflictCode.operation_reused });
         expect(await state(f.issuance.id)).toMatchObject({ status: IssuanceStatus.delivered, attempts: 1, operations: 1 });
@@ -266,9 +268,9 @@ describe('replay', () => {
 
     it('a second report with its own operation id on a closed task is still a conflict', async () => {
         const f = await fixture();
-        expect((await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, { ...allDelivered(f), operation_id: OP_A })).status).toBe(201);
+        expect((await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, { ...allDelivered(f), operation_id: OP_A, issuance_revision: 1 })).status).toBe(201);
 
-        const second = await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, { ...allDelivered(f), operation_id: OP_B });
+        const second = await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, { ...allDelivered(f), operation_id: OP_B, issuance_revision: 1 });
         expect(second.status).toBe(409);
         expect(second.body.code).toBe(ReportConflictCode.task_closed);
         expect(second.body.statusCode).toBe(409);
@@ -277,8 +279,8 @@ describe('replay', () => {
         //and when the two different operations race, one wins
         const g = await fixture();
         const [a, b] = await Promise.all([
-            post(`/api/delivery/tasks/${g.task.id}/attempts`, g.courierToken, { ...allDelivered(g), operation_id: OP_A }),
-            post(`/api/delivery/tasks/${g.task.id}/attempts`, g.courierToken, { ...allDelivered(g), operation_id: OP_B }),
+            post(`/api/delivery/tasks/${g.task.id}/attempts`, g.courierToken, { ...allDelivered(g), operation_id: OP_A, issuance_revision: 1 }),
+            post(`/api/delivery/tasks/${g.task.id}/attempts`, g.courierToken, { ...allDelivered(g), operation_id: OP_B, issuance_revision: 1 }),
         ]);
         expect([a.status, b.status].sort()).toEqual([201, 409]);
         expect(await state(g.issuance.id)).toEqual({ status: IssuanceStatus.delivered, tasks: [TaskStatus.done], pending: 0, attempts: 1, operations: 1, revision: 2 });
@@ -364,11 +366,11 @@ describe('a report on a task that was cancelled meanwhile', () => {
 describe('operation ids are per account', () => {
     it('another courier using the same id gets its own result and never the first one', async () => {
         const f = await fixture();
-        const a = await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, { ...allDelivered(f), operation_id: OP_A });
+        const a = await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, { ...allDelivered(f), operation_id: OP_A, issuance_revision: 1 });
         expect(a.status).toBe(201);
 
         //courier two, same operation id, on its own task: a fresh report, not a replay of courier one
-        const bBody = { recipient_type: RecipientType.other, recipient_name: 'שכן', recipient_id_number: '300123456', recipient_phone: '054-0000000', signature_png: OTHER_SIGNATURE, items: f.otherItemIds.map((item_id) => ({ item_id, delivered: true })), operation_id: OP_A };
+        const bBody = { recipient_type: RecipientType.other, recipient_name: 'שכן', recipient_id_number: '300123456', recipient_phone: '054-0000000', signature_png: OTHER_SIGNATURE, items: f.otherItemIds.map((item_id) => ({ item_id, delivered: true })), operation_id: OP_A, issuance_revision: 1 };
         const b = await post(`/api/delivery/tasks/${f.otherTask.id}/attempts`, f.otherToken, bBody);
         expect(b.status).toBe(201);
         expect(b.body.replayed).toBeUndefined();
@@ -379,7 +381,7 @@ describe('operation ids are per account', () => {
         expect(bAttempt).toMatchObject({ task_id: f.otherTask.id, recipient_name: 'שכן', signature_png: OTHER_SIGNATURE });
 
         //courier two on courier one's task, with courier one's id: not their task, no stored result, no signature
-        expect((await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.otherToken, { ...allDelivered(f), operation_id: OP_A })).status).toBe(404);
+        expect((await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.otherToken, { ...allDelivered(f), operation_id: OP_A, issuance_revision: 1 })).status).toBe(404);
         expect((await request(app.getHttpServer()).get(`/api/delivery/tasks/${f.task.id}`).set('Authorization', `Bearer ${f.otherToken}`)).status).toBe(404);
 
         const ops = await ds.getRepository(DeliveryOperation).find({ order: { id: 'ASC' } });
