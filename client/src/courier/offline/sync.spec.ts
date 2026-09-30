@@ -258,6 +258,36 @@ describe("sync worker", () => {
     expect(post).toHaveBeenCalledTimes(2);
   });
 
+  it("a conflict survives a stop and a same account start, a refresh that lost its task, and is never resent", async () => {
+    const { reports } = await seed([1]);
+    const { post, transport } = fakeTransport([{ status: 409, data: { statusCode: 409, message: "task is no longer open", code: ReportConflictCode.task_closed } }]);
+    await startSync(SCOPE, { transport, now, random: () => 0 });
+    expect(post).toHaveBeenCalledTimes(1);
+    expect((await getReport(SCOPE, reports[0].operation_id)).sync.state).toBe(ReportSyncState.conflict);
+
+    //logout stops the worker, the login of the same account starts it again with a new token: a permanent state is not
+    //a queued one, nothing goes out on the start, on a reconnect or on the courier's retry button
+    stopSync();
+    setToken({ sub: 7, exp: freshExp + 60 });
+    await startSync(SCOPE, { transport, now, random: () => 0 });
+    await kickSync("online");
+    expect(await retryReport(SCOPE, reports[0].operation_id)).toBe(false);
+    await kickSync("retry");
+    expect(post).toHaveBeenCalledTimes(1);
+
+    //the task left the server list (the other device closed it, the manager handled the issuance): the evidence stays as
+    //it was signed, under its original task id, and the board counts it for attention
+    await refresh(SCOPE, async () => snapshot([]));
+    const kept = await getReport(SCOPE, reports[0].operation_id);
+    expect(kept.sync).toMatchObject({ state: ReportSyncState.conflict, conflict_code: ReportConflictCode.task_closed, next_at: null });
+    expect(kept).toMatchObject({ task_id: 1, issuance_revision: 4, ack: null });
+    expect(kept.payload).toEqual(reports[0].payload);
+    expect(kept.client_reported_at).toBe(reports[0].client_reported_at);
+    expect((await listReports(SCOPE)).map((r) => r.operation_id)).toEqual([reports[0].operation_id]);
+    expect((await readBoard(SCOPE)).rows).toEqual([]);
+    expect(getSyncStatus()).toMatchObject({ pending: 0, attention: 1 });
+  });
+
   it("a 409 without a code falls back to task_closed, 400 is invalid, 403 and 404 are forbidden", async () => {
     const { reports } = await seed([1, 2, 3, 4]);
     const { post, transport } = fakeTransport([

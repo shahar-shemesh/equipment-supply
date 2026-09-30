@@ -228,6 +228,32 @@ describe('replay', () => {
         }
     });
 
+    it('a replay still returns the first result after the manager changed the issuance again', async () => {
+        const f = await fixture();
+        const body = { ...noneDelivered(f), operation_id: OP_A, issuance_revision: 1 };
+        const first = await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, body);
+        expect(first.status).toBe(201);
+
+        //not delivered goes back to the board: the manager sends courier two and later deletes the issuance. the revision
+        //moves twice and another task exists, the tablet's retry of the original operation is still the same replay
+        expect((await post('/api/issuances/assign', f.managerToken, { ids: [f.issuance.id], courier_id: f.otherCourier.id })).status).toBe(201);
+        const afterAssign = await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, body);
+        expect(afterAssign.status).toBe(201);
+        expect(afterAssign.body).toEqual({ ...first.body, replayed: true });
+
+        const del = await request(app.getHttpServer()).delete(`/api/issuances/${f.issuance.id}`).set('Authorization', `Bearer ${f.managerToken}`).send({ reason: 'x' });
+        expect(del.status).toBe(200);
+        const afterDelete = await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, body);
+        expect(afterDelete.status).toBe(201);
+        expect(afterDelete.body).toEqual({ ...first.body, replayed: true });
+
+        //a different operation on the same old task is not a replay, it is a stale report and stays refused
+        const second = await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, { ...allDelivered(f), operation_id: OP_B, issuance_revision: 1 });
+        expect(second.status).toBe(409);
+        expect(second.body.code).toBe(ReportConflictCode.task_closed);
+        expect(await state(f.issuance.id)).toEqual({ status: IssuanceStatus.deleted, tasks: [TaskStatus.done, TaskStatus.cancelled], pending: 0, attempts: 1, operations: 1, revision: 4 });
+    });
+
     it('the same operation id with different content is refused', async () => {
         const f = await fixture();
         expect((await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, { ...allDelivered(f), operation_id: OP_A })).status).toBe(201);

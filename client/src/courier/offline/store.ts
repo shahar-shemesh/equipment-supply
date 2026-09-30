@@ -2,6 +2,7 @@ import { AttemptOutcome, IAttemptResult, IDeliveryAttempt, IDeliveryTask, IUser,
 import { compareTasksForBoard, normalizeSapNumber } from "../../../../shared/@utils";
 import { DraftRow, LocalReport, MetaRow, ReportSync, TaskDetailRow, TaskRow, openCourierDb, scopeRange, storageError, writeTx } from "./db";
 import { newOperationId } from "./uuid";
+import { tokenMatchesScope } from "./identity";
 import { kickSync, noteBackgroundResult, offlineGet } from "./sync";
 
 //the one place the courier screens read and write local data. every function takes the scope (identity.ts scopeOf) and
@@ -166,13 +167,26 @@ const inFlight = new Map<string, Promise<RefreshResult>>();
 //a thrown fetch or a response that is not a complete unfiltered list (shape check + rows.length === counts.all) leaves
 //the old snapshot in place, writes meta.last_error and resolves { ok: false, error }. concurrent calls for the same scope
 //share one promise. never rejects
-export async function refresh(scope: string, fetchAll: () => Promise<any> = () => offlineGet("/delivery/tasks", { tab: "all" })): Promise<RefreshResult> {
+export async function refresh(scope: string, fetchAll: () => Promise<any> = () => scopedFetchAll(scope)): Promise<RefreshResult> {
   assertScope(scope);
   const running = inFlight.get(scope);
   if (running) return running;
   const p = doRefresh(scope, fetchAll).finally(() => inFlight.delete(scope));
   inFlight.set(scope, p);
   return p;
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//the default source of a refresh: the list of the account the scope belongs to. refused up front when the stored token
+//is someone else's (a second tab still on the first courier after an account switch would otherwise store the second
+//courier's list under the first one's scope). same rejection shape as an expired token, the caller sees auth_required
+function scopedFetchAll(scope: string): Promise<any> {
+  if (!tokenMatchesScope(scope)) {
+    noteBackgroundResult("auth");
+    return Promise.reject(Object.assign(new Error("auth_required"), { auth_required: true }));
+  }
+  return offlineGet("/delivery/tasks", { tab: "all" });
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/

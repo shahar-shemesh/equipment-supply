@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import { TaskStatus } from "../../../../shared/@core";
 import { LocalReport, storageError } from "./db";
-import { currentToken, tokenIsFresh } from "./identity";
+import { currentToken, tokenIsFresh, tokenMatchesScope } from "./identity";
 import { BoardData, ScopeWork, Tab, TaskData, cacheTaskDetail, listReports, otherScopesWithPendingWork, readBoard, readTask, refresh, subscribe } from "./store";
 import { SyncStatus, getSyncStatus, offlineGet, subscribeSync } from "./sync";
 
@@ -85,7 +85,8 @@ export function useTask(scope: string | null, id: number): Hook<TaskData | null>
     async function load() {
       let r = await readTask(scope, id);
       if (cancelled) return;
-      const canFetch = online() && tokenIsFresh(currentToken());
+      //no request for this scope under another account's token (a second tab after an account switch)
+      const canFetch = online() && tokenIsFresh(currentToken()) && tokenMatchesScope(scope);
       if (!r.task && canFetch) {
         await refresh(scope);
         if (cancelled) return;

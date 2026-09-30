@@ -332,6 +332,8 @@ export default function TaskDetailPage() {
               <SyncChip state={local.sync.state} />
               <span className="muted small">{t("sync_saved_at", { time: formatDateTime(local.client_reported_at) })}</span>
               {local.ack && <span className="muted small">{t("sync_received_at", { time: formatDateTime(local.ack.reported_at) })}</span>}
+              {/* the server's report above is the truth, this line says why the one saved here was refused */}
+              {local.sync.state === ReportSyncState.conflict && local.sync.conflict_code && <span className="small">{t(`conflict_${local.sync.conflict_code}`)}</span>}
               <Link to={`/courier/reports/${local.operation_id}`} className="small">{t("sync_view_report")}</Link>
             </div>
           )}

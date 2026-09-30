@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deleteDB } from "idb";
 
 import { ReportSyncState, TaskStatus } from "../../../../shared/@core";
-import { PNG, SCOPE, courierUser, fullForm, makeTask, snapshot } from "../../test/fixtures";
+import { PNG, SCOPE, courierUser, fullForm, makeTask, makeToken, setToken, snapshot } from "../../test/fixtures";
 import { DB_NAME, MetaRow, closeDb, openCourierDb } from "./db";
+import { tokenMatchesScope } from "./identity";
 import { cacheTaskDetail, closeChannel, getDraft, getReport, listReports, putDraft, readBoard, readTask, refresh, refreshIfStale, submitReport, updateReportSync } from "./store";
 import { getSyncStatus, resetSyncForTests } from "./sync";
 
@@ -12,6 +13,8 @@ import { getSyncStatus, resetSyncForTests } from "./sync";
 beforeEach(async () => {
   await closeDb();
   await deleteDB(DB_NAME);
+  //no token: the default refresh source must stop before any request, jsdom's location would reach a real port 3000
+  localStorage.clear();
 });
 
 afterEach(async () => {
@@ -31,6 +34,25 @@ const draft = { answers: {}, recipient_type: "customer" as any, recipient: { nam
 /*──────────────────────────────────────────────────────────────────────────*/
 
 describe("refresh", () => {
+  it("the default source refuses another account's token and leaves the snapshot alone", async () => {
+    expect(await refresh(SCOPE, async () => snapshot([makeTask(1)]))).toEqual({ ok: true });
+    const exp = Math.floor(Date.now() / 1000) + 3600;
+
+    //a second tab still on courier 7 while courier 8 signed in: no request, nothing replaced, the status asks for a login
+    setToken({ sub: 8, courier_id: 4, exp });
+    expect(await refresh(SCOPE)).toEqual({ ok: false, error: "auth_required" });
+    expect((await readBoard(SCOPE)).rows.map((r) => r.id)).toEqual([1]);
+    expect((await meta()).last_error).toBe("auth_required");
+    expect(getSyncStatus().auth_required).toBe(true);
+
+    //the guard itself: only the token of the scope's own user and courier passes (no request is made here, jsdom's
+    //location would reach a real port 3000)
+    expect(tokenMatchesScope(SCOPE, makeToken({ sub: 7, courier_id: 3, exp }))).toBe(true);
+    expect(tokenMatchesScope(SCOPE, makeToken({ sub: 7, courier_id: 4, exp }))).toBe(false);
+    expect(tokenMatchesScope(SCOPE, null)).toBe(false);
+    localStorage.clear();
+  });
+
   it("replaces the snapshot atomically and marks the dataset ready", async () => {
     expect((await readBoard(SCOPE)).ready).toBe(false);
     expect(await refresh(SCOPE, async () => snapshot([makeTask(1), makeTask(2)]))).toEqual({ ok: true });

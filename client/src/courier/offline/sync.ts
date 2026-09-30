@@ -147,7 +147,11 @@ export async function startSync(s: string, d: SyncDeps = {}): Promise<void> {
   setStatus({});
 
   unsubscribeStore = subscribe((e) => {
-    if (e.kind === "kick" && e.scope === scope) kickSync("channel").catch(() => {});
+    if (e.scope !== scope) return;
+    if (e.kind === "kick") kickSync("channel").catch(() => {});
+    //the tab that held the lock changed the report states: the strip here counts from the database, not from a pass of
+    //its own, or it keeps saying "2 ממתינים" until its timer runs
+    if (e.kind === "reports" && e.remote) refreshCounts(scope).catch(() => {});
   });
   if (typeof window !== "undefined") {
     listen(window, "online", () => {

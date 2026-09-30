@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 
 import { IUser, UserRole } from "../../../shared/@core";
 import { post, TOKEN_KEY, USER_KEY } from "./service";
@@ -21,6 +21,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return null;
     }
   });
+
+  //a login or logout in another tab of the same browser: this tab follows it instead of staying on the old account with
+  //the new account's token in storage (the courier screens restart their sync worker when the user changes)
+  useEffect(() => {
+    function onStorage(e: StorageEvent) {
+      if (e.key !== USER_KEY && e.key !== null) return;
+      try {
+        setUser(normalizeUser(JSON.parse(localStorage.getItem(USER_KEY) || "null")));
+      } catch (err) {
+        setUser(null);
+      }
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   async function login(username: string, password: string) {
     const res = await post("/auth/login", { username, password });

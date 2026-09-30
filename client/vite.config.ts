@@ -9,10 +9,11 @@ const tlsKey = process.env.CLIENT_TLS_KEY;
 const tlsCert = process.env.CLIENT_TLS_CERT;
 const https = tlsKey && tlsCert && existsSync(tlsKey) && existsSync(tlsCert) ? { key: readFileSync(tlsKey), cert: readFileSync(tlsCert) } : undefined;
 
-//the same proxy for dev and preview: npm run preview serves the built app (with the service worker) and still needs the api
+//the same proxy for dev and preview: npm run preview serves the built app (with the service worker) and still needs the api.
+//API_PROXY_TARGET points it at another instance, e.g. one that runs against the test database while the dev server keeps 3000
 const proxy = {
   "/api": {
-    target: "http://localhost:3000",
+    target: process.env.API_PROXY_TARGET || "http://localhost:3000",
     changeOrigin: true,
   },
 };

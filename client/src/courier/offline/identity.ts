@@ -60,3 +60,15 @@ export function tokenIsFresh(token: string | null | undefined, now = Date.now())
 export function isSecureContext(): boolean {
   return typeof window !== "undefined" && window.isSecureContext === true;
 }
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//true when the stored token belongs to the account the scope was made for. every background read of a scope checks it:
+//another courier signed in on this device (a second tab still shows the first one) must never refresh the first
+//courier's snapshot with their own list, the worker makes the same check before sending a report
+export function tokenMatchesScope(scope: string | null | undefined, token: string | null | undefined = currentToken()): boolean {
+  const p = decodeJwt(token);
+  if (!p || !scope) return false;
+  const [userId, courierId] = scope.split(":");
+  return String(p.sub) === userId && String(p.courier_id ?? "") === courierId;
+}
