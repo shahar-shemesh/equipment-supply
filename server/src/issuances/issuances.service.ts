@@ -83,6 +83,11 @@ export class IssuancesService {
       .where('i.deleted_at IS NULL');
 
     if (q.status) qb.andWhere('i.status = :status', { status: q.status });
+    //QR lookup must not match a partial number, address or customer name.
+    if (q.number != null) {
+      if (typeof q.number !== 'string' || !/^\d+$/.test(q.number)) throw new BadRequestException('number must contain digits only');
+      qb.andWhere('i.sap_number = :number', { number: q.number });
+    }
     if (q.priority) qb.andWhere('i.priority = :priority', { priority: q.priority });
     if (q.city) qb.andWhere('i.address_city = :city', { city: q.city });
     if (q.customer) qb.andWhere('i.customer_name ILIKE :customer', { customer: `%${q.customer}%` });

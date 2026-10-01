@@ -20,7 +20,7 @@ What runs today:
 - PostgreSQL schema with one migration, a seed with 30 sample issuances, 118 tests (69 server, 49 client).
 - Responsive layout for phone, tablet and desktop.
 
-What does not exist: the SAP interface, QR camera scanning, history and analytics screens, PDF / SMS / email confirmations, the courier Excel import, production authentication, synchronization while the app is closed (no Background Sync), raster and iOS home screen icons, any way for a manager to apply, merge or reassign a rejected report (the manager can read it and mark it reviewed, see [Unresolved reports](#unresolved-reports)). Details under [Sample data and what is missing](#sample-data-and-what-is-missing).
+What does not exist: the SAP interface, history and analytics screens, PDF / SMS / email confirmations, the courier Excel import, production authentication, synchronization while the app is closed (no Background Sync), raster and iOS home screen icons, any way for a manager to apply, merge or reassign a rejected report (the manager can read it and mark it reviewed, see [Unresolved reports](#unresolved-reports)). Details under [Sample data and what is missing](#sample-data-and-what-is-missing).
 
 ## Stack
 
@@ -345,11 +345,11 @@ Not covered by automation: the built app in a real browser (offline reload throu
 ## Sample data and what is missing
 
 - Every issuance, courier and customer comes from `server/src/seed/seed.data.ts`. There is no SAP: the interface is not defined and none was invented. The `source` column on an issuance (`sample` today) is the only touch point.
-- QR scanning: the dialog shows the camera frame from the design and works through manual number entry. Which camera library, and what the QR encodes, are open.
+- QR scanning uses qr-scanner in both boards. The QR must contain the SAP issuance number as digits only (leading zeros are kept), not a URL or JSON. The courier searches the device first; the manager opens the exact matching issuance. Camera access needs HTTPS or localhost and browser permission. Manual entry remains available. The scanner worker is bundled and precached with the built PWA; no external decoder service is used.
 - Couriers: add, edit and delete follow the `ניהול שליחים` screens. The Excel import (spec 2.7.2) has no design. Delete is a soft `active=false` (the delivery tasks point at the row) and is refused while the courier has open deliveries.
 - Reports and the KPI dashboard: placeholder page. The diagram has a question mark on the KPI definition.
 - History, analytics, PDF, SMS and email were not built. They have no screen in the design.
-- The manager's "find issuance" button only focuses the search; its behavior on that side was not defined.
+- The manager's "find issuance" button opens camera scanning and manual number entry, independently of the board filters.
 - Grouping issuances by address exists on the courier board only, not on the manager table.
 - The drag handle on courier cards is visual; route reordering is not implemented.
 - Offline work covers the courier side only. Reports the sync rejected have no manager screen; the courier shows them from the device (see [Unresolved reports](#unresolved-reports)). Nothing syncs while the app is closed. The PWA has an SVG icon only.

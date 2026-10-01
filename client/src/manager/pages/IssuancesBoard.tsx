@@ -11,6 +11,7 @@ import { IssuancesTable, RowAction } from "../components/IssuancesTable";
 import { SideWidgets } from "../components/SideWidgets";
 import { AssignCourierDialog } from "../components/AssignCourierDialog";
 import { IssuanceDetailDialog } from "../components/IssuanceDetailDialog";
+import { FindNumberDialog } from "../../components/FindNumberDialog";
 
 const PAGE_SIZE = 15; //the design shows 15 rows a page
 
@@ -29,6 +30,7 @@ export default function IssuancesBoard() {
   const [updatedAt, setUpdatedAt] = useState<Date>(null);
   const [assignIds, setAssignIds] = useState<number[]>(null); //null = dialog closed
   const [detailId, setDetailId] = useState<number>(null);
+  const [finding, setFinding] = useState(false);
   const [toast, setToast] = useState<{ text: string; severity: "success" | "error" }>(null);
 
   async function load() {
@@ -117,8 +119,7 @@ export default function IssuancesBoard() {
             <h1>{t("board_title")}</h1>
             <div className="board__updated">{updatedAt ? t("board_updated_at", { time: formatDateTime(updatedAt) }) : t("loading")}</div>
           </div>
-          {/* the QR button of the manager side has no defined behavior yet (find by number? open the camera?) so it only opens the search */}
-          <Button variant="contained" className="board__find" startIcon={<QrCodeScannerIcon />} onClick={() => document.getElementById("board-search")?.focus()}>
+          <Button variant="contained" className="board__find" startIcon={<QrCodeScannerIcon />} onClick={() => setFinding(true)}>
             {t("find_issuance")}
           </Button>
         </div>
@@ -144,6 +145,13 @@ export default function IssuancesBoard() {
       </div>
 
       <SideWidgets couriers={couriers} byCity={summary.by_city} />
+
+      {finding && <FindNumberDialog lookup={async (number) => {
+        //Exact number lookup ignores the board filters and stays behind the manager API guard.
+        const res = await get("/issuances", { number, page_size: 1 });
+        if (!res.rows.length) throw new Error(t("find_not_found"));
+        return res.rows[0].id;
+      }} onClose={() => setFinding(false)} onFound={setDetailId} />}
 
       {selected.length > 0 && (
         <div className="board__bottom-bar">
