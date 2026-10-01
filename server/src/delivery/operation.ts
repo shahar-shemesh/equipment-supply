@@ -42,12 +42,14 @@ export function parseClientTime(raw: any): Date | null {
 
 //sha256 over the VALIDATED report, in a fixed key order and with the answers sorted by item id, so a retry that trimmed a
 //name differently or listed the lines in another order still hashes the same. the task id is part of it: the same
-//operation id on another task is a different report
-export function payloadHash(data: { task_id: number; recipient: Recipient; signature_png: string; items: ItemAnswer[] }) {
+//operation id on another task is a different report. a report that delivered nothing has no recipient and no signature,
+//both hash as null then
+export function payloadHash(data: { task_id: number; recipient: Recipient | null; signature_png: string | null; items: ItemAnswer[] }) {
+  const r = data.recipient;
   const canonical = {
     task_id: data.task_id,
-    recipient: { type: data.recipient.type, name: data.recipient.name, id_number: data.recipient.id_number, phone: data.recipient.phone },
-    signature_png: data.signature_png,
+    recipient: r ? { type: r.type, name: r.name, id_number: r.id_number, phone: r.phone } : null,
+    signature_png: data.signature_png ?? null,
     items: [...data.items].sort((a, b) => a.item_id - b.item_id).map((a) => ({ item_id: a.item_id, delivered: a.delivered, reason: a.reason, reason_details: a.reason_details })),
   };
   return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');

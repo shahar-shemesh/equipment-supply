@@ -190,11 +190,12 @@ export interface IDeliveryAttempt {
   id: number;
   task_id: number;
   outcome: AttemptOutcome;
-  recipient_type: RecipientType;
-  recipient_name?: string;
-  recipient_id_number?: string;
-  recipient_phone?: string;
-  signature_png?: string; //data url
+  //null when nothing was handed over (outcome not_delivered): no one received, so there is no recipient and no signature
+  recipient_type: RecipientType | null;
+  recipient_name?: string | null;
+  recipient_id_number?: string | null;
+  recipient_phone?: string | null;
+  signature_png?: string | null; //data url
   reported_at: string; //server receipt time
   client_reported_at?: string; //the device clock when the courier tapped send. untrusted, can be hours before reported_at after an outage
   items?: IDeliveryAttemptItem[];
@@ -202,11 +203,13 @@ export interface IDeliveryAttempt {
 
 // what the courier screen posts to /api/delivery/tasks/:id/attempts
 export interface IAttemptPayload {
-  recipient_type: RecipientType;
+  //required when at least one line was delivered. when every line is "not delivered" there is no one to sign, and the
+  //recipient and the signature are left out (null / empty); the server stores nulls then
+  recipient_type: RecipientType | null;
   recipient_name?: string;
   recipient_id_number?: string;
   recipient_phone?: string;
-  signature_png: string;
+  signature_png: string | null;
   items: IDeliveryAttemptItem[];
   //offline queue: the same operation_id sent again is a replay of the first result, not a second attempt.
   //all three are optional, a request without them behaves exactly as before the offline work
@@ -259,12 +262,12 @@ export interface IDeliveryConflict {
   task_id: number;
   issuance_id: number;
   submitted_revision?: number | null;
-  recipient_type: RecipientType;
-  recipient_name?: string;
-  recipient_id_number?: string;
-  recipient_phone?: string;
+  recipient_type: RecipientType | null; //null when the signed report delivered nothing, same rule as a delivery attempt
+  recipient_name?: string | null;
+  recipient_id_number?: string | null;
+  recipient_phone?: string | null;
   items: IDeliveryAttemptItem[];
-  signature_png?: string; //only in the detail response
+  signature_png?: string | null; //only in the detail response
   rejection_code: ReportConflictCode;
   rejection_message?: string;
   observed: IConflictObserved;

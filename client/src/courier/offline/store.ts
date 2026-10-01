@@ -367,6 +367,17 @@ export async function deleteDraft(scope: string, taskId: number): Promise<void> 
 
 /*──────────────────────────────────────────────────────────────────────────*/
 
+//nothing handed over: every line of the issuance answered "not delivered". no one received and no one signs, so the
+//recipient and the signature are neither asked for nor sent (the same rule as handedOver() on the server, read from the
+//form instead of validated answers). a line still unanswered keeps both sections on the screen, the item errors block
+//the send anyway
+export function nothingDelivered(task: IDeliveryTask, answers: Record<number, any>): boolean {
+  const items = task?.issuance?.items || [];
+  return items.length > 0 && items.every((i) => answers?.[i.id]?.delivered === false);
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
 //the same checks as the old TaskDetailPage.validate, returning the field error map with i18n KEYS as values (the screen
 //runs t() on them): { item_<id>: { delivered, reason, reason_details }, recipient_name, recipient_id_number,
 //recipient_phone, signature }. an empty object means the form is complete
@@ -380,6 +391,7 @@ export function validateReportForm(task: IDeliveryTask, form: ReportForm): Recor
     if (a.delivered === false && !(a.reason_details || "").trim()) itemErrors.reason_details = "required";
     if (Object.keys(itemErrors).length) errors[`item_${item.id}`] = itemErrors;
   }
+  if (nothingDelivered(task, form.answers)) return errors;
   if (form.recipient_type === RecipientType.other) {
     if (!(form.recipient?.name || "").trim()) errors.recipient_name = "required";
     if (!(form.recipient?.id_number || "").trim()) errors.recipient_id_number = "required";
@@ -415,6 +427,7 @@ export async function submitReport(scope: string, user: IUser, task: IDeliveryTa
   const issuance = task.issuance;
   const items = issuance.items.map((item) => ({ item_id: item.id, ...form.answers[item.id] }));
   const other = form.recipient_type === RecipientType.other;
+  const handover = !nothingDelivered(task, form.answers);
   const now = Date.now();
   //two sends inside the same millisecond (prev / next on a fast tablet) must still go out in order
   lastSeq = Math.max(now, lastSeq + 1);
@@ -436,19 +449,26 @@ export async function submitReport(scope: string, user: IUser, task: IDeliveryTa
       address_building: issuance.address_building,
       address_city: issuance.address_city,
       items: issuance.items.map((i) => ({ id: i.id, product_name: i.product_name, catalog_number: i.catalog_number, quantity: i.quantity })),
-      //mirrors validateRecipient on the server: "הלקוח/ה" means the customer of the issuance, whatever the fields hold
-      recipient: other
-        ? { name: form.recipient.name, id_number: form.recipient.id_number, phone: form.recipient.phone }
-        : { name: issuance.customer_name, id_number: issuance.customer_id_number || "", phone: issuance.customer_phone || "" },
+      //mirrors validateRecipient on the server: "הלקוח/ה" means the customer of the issuance, whatever the fields hold.
+      //null when nothing was delivered: no one received
+      recipient: !handover
+        ? null
+        : other
+          ? { name: form.recipient.name, id_number: form.recipient.id_number, phone: form.recipient.phone }
+          : { name: issuance.customer_name, id_number: issuance.customer_id_number || "", phone: issuance.customer_phone || "" },
     },
-    payload: {
-      recipient_type: form.recipient_type,
-      recipient_name: form.recipient.name,
-      recipient_id_number: form.recipient.id_number,
-      recipient_phone: form.recipient.phone,
-      signature_png: form.signature_png,
-      items,
-    },
+    payload: handover
+      ? {
+          recipient_type: form.recipient_type,
+          recipient_name: form.recipient.name,
+          recipient_id_number: form.recipient.id_number,
+          recipient_phone: form.recipient.phone,
+          signature_png: form.signature_png,
+          items,
+        }
+      //nothing handed over: no recipient and no signature leave the device, whatever the form still held from before the
+      //courier switched the last line to "not delivered"
+      : { recipient_type: null, signature_png: null, items },
     outcome: outcomeOf(items),
     client_reported_at: new Date(now).toISOString(),
     sync: { state: ReportSyncState.queued, tries: 0, next_at: null, last_error: null, http_status: null, conflict_code: null, updated_at: new Date(now).toISOString() },
@@ -699,9 +719,9 @@ export function localAttempt(report: LocalReport): IDeliveryAttempt {
     task_id: report.task_id,
     outcome: report.outcome,
     recipient_type: report.payload.recipient_type,
-    recipient_name: report.display.recipient.name,
-    recipient_id_number: report.display.recipient.id_number,
-    recipient_phone: report.display.recipient.phone,
+    recipient_name: report.display.recipient?.name ?? null,
+    recipient_id_number: report.display.recipient?.id_number ?? null,
+    recipient_phone: report.display.recipient?.phone ?? null,
     signature_png: report.payload.signature_png,
     reported_at: report.ack?.reported_at ?? report.client_reported_at,
     client_reported_at: report.client_reported_at,

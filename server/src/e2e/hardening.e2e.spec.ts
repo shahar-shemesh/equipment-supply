@@ -123,6 +123,43 @@ describe('malformed item answers over http', () => {
     });
 });
 
+describe('nothing delivered', () => {
+    it('a report whose every line is not delivered needs no recipient and no signature, and stores none', async () => {
+        const f = await fixture();
+        const bare = { items: noneDelivered(f).items };
+        const res = await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, bare);
+        expect(res.status).toBe(201);
+        expect(res.body.outcome).toBe('not_delivered');
+
+        const attempt = await ds.getRepository(DeliveryAttempt).findOne({ where: { id: res.body.attempt_id } });
+        expect(attempt).toMatchObject({ recipient_type: null, recipient_name: null, recipient_id_number: null, recipient_phone: null, signature_png: null });
+        expect(await state(f.issuance.id)).toEqual({ status: IssuanceStatus.not_delivered, tasks: [TaskStatus.done], pending: 0, attempts: 1 });
+
+        //the courier's task screen and the manager's detail read the attempt back with the nulls, not with a made up customer
+        const detail = await request(app.getHttpServer()).get(`/api/delivery/tasks/${f.task.id}`).set('Authorization', `Bearer ${f.courierToken}`);
+        expect(detail.status).toBe(200);
+        expect(detail.body.attempts[0]).toMatchObject({ recipient_type: null, recipient_name: null, signature_png: null });
+    });
+
+    it('the customer sent along by an older tablet build is still stored, and one delivered line still needs a signature', async () => {
+        const f = await fixture();
+        const legacy = await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, noneDelivered(f));
+        expect(legacy.status).toBe(201);
+        const attempt = await ds.getRepository(DeliveryAttempt).findOne({ where: { id: legacy.body.attempt_id } });
+        expect(attempt).toMatchObject({ recipient_type: RecipientType.customer, recipient_name: 'ישראל ישראלי', signature_png: SAMPLE_SIGNATURE });
+
+        const g = await fixture();
+        const partial = { items: [{ item_id: g.itemIds[0], delivered: true }, { item_id: g.itemIds[1], delivered: false, reason: NonDeliveryReason.customer_refused, reason_details: 'לא רצה' }] };
+        const noRecipient = await post(`/api/delivery/tasks/${g.task.id}/attempts`, g.courierToken, partial);
+        expect(noRecipient.status).toBe(400);
+        expect(noRecipient.body.message).toContain('recipient_type');
+        const noSignature = await post(`/api/delivery/tasks/${g.task.id}/attempts`, g.courierToken, { ...partial, recipient_type: RecipientType.customer });
+        expect(noSignature.status).toBe(400);
+        expect(noSignature.body.message).toContain('signature_png');
+        expect(await state(g.issuance.id)).toMatchObject({ status: IssuanceStatus.assigned, pending: 1, attempts: 0 });
+    });
+});
+
 describe('duplicate submissions', () => {
     it('two concurrent reports on the same task: one 201, one 409, one attempt', async () => {
         const f = await fixture();

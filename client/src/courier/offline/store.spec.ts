@@ -5,7 +5,7 @@ import { AttemptOutcome, IssuanceStatus, Priority, RecipientType, ReportSyncStat
 import { compareTasksForBoard, groupByAddress } from "../../../../shared/@utils";
 import { OTHER_SCOPE, PNG, SCOPE, courierUser, failedForm, fullForm, makeTask, otherUser, partialForm, snapshot } from "../../test/fixtures";
 import { DB_NAME, closeDb, openCourierDb } from "./db";
-import { closeChannel, deleteDraft, getDraft, getReport, listReports, lookupLocal, otherScopesWithPendingWork, putDraft, readBoard, readPendingIds, readTask, refresh, retryReport, requeueAuth, submitReport, updateReportSync } from "./store";
+import { closeChannel, deleteDraft, getDraft, getReport, listReports, lookupLocal, nothingDelivered, otherScopesWithPendingWork, putDraft, readBoard, readPendingIds, readTask, refresh, retryReport, requeueAuth, submitReport, updateReportSync, validateReportForm } from "./store";
 import { resetSyncForTests } from "./sync";
 
 //the data layer against fake-indexeddb: partitioning, the overlay, drafts and the atomic submit
@@ -125,6 +125,32 @@ describe("readTask", () => {
     const form = { ...fullForm(t2), recipient_type: RecipientType.other, recipient: { name: "שכן", id_number: "123456789", phone: "052-0000000" } };
     const other = await submitReport(SCOPE, courierUser, t2, form);
     expect(other.display.recipient).toEqual({ name: "שכן", id_number: "123456789", phone: "052-0000000" });
+  });
+
+  it("nothing delivered: no recipient and no signature are asked for, none leave the device", async () => {
+    const t = makeTask(1);
+    await refresh(SCOPE, async () => snapshot([t]));
+    const form = { ...failedForm(t), recipient_type: RecipientType.other, recipient: { name: "", id_number: "", phone: "" }, signature_png: "" };
+    expect(nothingDelivered(t, form.answers)).toBe(true);
+    expect(validateReportForm(t, form)).toEqual({});
+
+    //whatever the form still held is not sent: a drawn signature or a typed name from before the last line flipped
+    const stale = { ...failedForm(t), recipient_type: RecipientType.other, recipient: { name: "שכן", id_number: "123456789", phone: "052-0000000" }, signature_png: PNG };
+    const report = await submitReport(SCOPE, courierUser, t, stale);
+    expect(report.outcome).toBe(AttemptOutcome.not_delivered);
+    expect(report.payload).toEqual({ recipient_type: null, signature_png: null, items: report.payload.items });
+    expect(report.display.recipient).toBeNull();
+    const r = await readTask(SCOPE, 1);
+    expect(r.task.attempts[0]).toMatchObject({ recipient_type: null, recipient_name: null, signature_png: null });
+
+    //one delivered line brings both back, and an unanswered line keeps them
+    const partial = partialForm(makeTask(2));
+    expect(nothingDelivered(makeTask(2), partial.answers)).toBe(false);
+    expect(validateReportForm(makeTask(2), { ...partial, signature_png: "" })).toEqual({ signature: "signature_missing" });
+    const unanswered = failedForm(makeTask(3));
+    delete unanswered.answers[makeTask(3).issuance.items[0].id];
+    expect(nothingDelivered(makeTask(3), unanswered.answers)).toBe(false);
+    expect(validateReportForm(makeTask(3), { ...unanswered, signature_png: "" })).toMatchObject({ signature: "signature_missing" });
   });
 
   it("a rejected report leaves the snapshot task pending and attaches local_report with the conflict code", async () => {

@@ -5,7 +5,7 @@ import { In, Repository } from 'typeorm';
 import { ConflictReviewStatus, IAttemptResult, IConflictObserved, IConflictReceipt, IConflictStatus, IDeliveryConflict, IssuanceStatus, ReportConflictCode, TaskStatus } from '../../../shared/@core';
 import { DeliveryAttempt, DeliveryConflict, DeliveryOperation, DeliveryTask, Issuance, User } from '../entities';
 import { lockIssuance } from '../issuances/issuances.service';
-import { validateRecipient, validateSignature } from './attempt.validation';
+import { handedOver, validateRecipient, validateSignature } from './attempt.validation';
 import { isConflictUniqueViolation, parseClientTime, payloadHash, validateEvidenceItems, validateIssuanceRevision, validateOperationId } from './operation';
 
 //rejected delivery reports kept as evidence. the courier side hands a report the attempts route refused over as it was
@@ -68,8 +68,9 @@ export class ConflictsService {
     if (!operationId) throw new BadRequestException('operation_id is required to keep a rejected report');
     const submittedRevision = validateIssuanceRevision(body?.issuance_revision);
     const items = validateEvidenceItems(body?.items);
-    const recipient = validateRecipient(body, task.issuance);
-    const signature = validateSignature(body?.signature_png);
+    //the same rule as a delivery report: nothing delivered, no one to sign, recipient and signature optional
+    const recipient = validateRecipient(body, task.issuance, handedOver(items));
+    const signature = validateSignature(body?.signature_png, handedOver(items));
     const clientReportedAt = parseClientTime(body?.client_reported_at);
     const hash = payloadHash({ task_id: task.id, recipient, signature_png: signature, items });
 
@@ -108,10 +109,10 @@ export class ConflictsService {
           task_id: task.id,
           issuance_id: task.issuance_id,
           submitted_revision: submittedRevision,
-          recipient_type: recipient.type,
-          recipient_name: recipient.name,
-          recipient_id_number: recipient.id_number,
-          recipient_phone: recipient.phone,
+          recipient_type: recipient?.type ?? null,
+          recipient_name: recipient?.name ?? null,
+          recipient_id_number: recipient?.id_number ?? null,
+          recipient_phone: recipient?.phone ?? null,
           items,
           signature_png: signature,
           payload_hash: hash,

@@ -1,7 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 
 import { AttemptOutcome, NonDeliveryReason, RecipientType } from '../../../shared/@core';
-import { outcomeOf, validateItemAnswers, validateRecipient, validateSignature, SIGNATURE_MAX_BYTES } from './attempt.validation';
+import { handedOver, outcomeOf, validateItemAnswers, validateRecipient, validateSignature, SIGNATURE_MAX_BYTES } from './attempt.validation';
 
 const items = [{ id: 11 }, { id: 12 }];
 
@@ -107,6 +107,40 @@ describe('validateRecipient', () => {
     it('trims and accepts a valid other person', () => {
         const out = validateRecipient({ recipient_type: RecipientType.other, recipient_name: ' רוני כהן ', recipient_id_number: '300123456', recipient_phone: '054-0000000' }, customer);
         expect(out).toEqual({ type: RecipientType.other, name: 'רוני כהן', id_number: '300123456', phone: '054-0000000' });
+    });
+});
+
+describe('nothing delivered', () => {
+    const customer = { customer_name: 'ישראל ישראלי', customer_id_number: '012345678', customer_phone: '050-1234567' };
+    const yes = { item_id: 1, delivered: true, reason: null, reason_details: null };
+    const no = { item_id: 2, delivered: false, reason: NonDeliveryReason.other, reason_details: 'x' };
+
+    it('handedOver is true as soon as one line was delivered', () => {
+        expect(handedOver([no, no])).toBe(false);
+        expect(handedOver([yes, no])).toBe(true);
+        expect(handedOver([])).toBe(false);
+    });
+
+    it('an absent or empty recipient and signature are null when not required', () => {
+        expect(validateRecipient(undefined, customer, false)).toBeNull();
+        expect(validateRecipient({ recipient_type: null }, customer, false)).toBeNull();
+        expect(validateRecipient({ recipient_type: '' }, customer, false)).toBeNull();
+        expect(validateSignature(undefined, false)).toBeNull();
+        expect(validateSignature(null, false)).toBeNull();
+        expect(validateSignature('', false)).toBeNull();
+    });
+
+    it('a recipient or a signature that is sent anyway is checked as usual', () => {
+        expect(validateRecipient({ recipient_type: RecipientType.customer }, customer, false)).toEqual({ type: RecipientType.customer, name: customer.customer_name, id_number: customer.customer_id_number, phone: customer.customer_phone });
+        expect400(() => validateRecipient({ recipient_type: 'neighbour' }, customer, false), 'recipient_type');
+        expect400(() => validateRecipient({ recipient_type: RecipientType.other, recipient_name: '' }, customer, false), 'recipient_name');
+        expect(validateSignature(PNG, false)).toBe(PNG);
+        expect400(() => validateSignature('data:image/jpeg;base64,/9j/4AAQ', false), 'png data url');
+    });
+
+    it('required stays the default: the same inputs are 400s', () => {
+        expect400(() => validateRecipient(undefined, customer), 'recipient_type');
+        expect400(() => validateSignature(''), 'png data url');
     });
 });
 

@@ -101,10 +101,17 @@ export default function ReportDetailPage() {
             </div>
           );
         })}
-        <div className="kv"><label>{t("recipient_section")}</label><span>{d.recipient.name} {d.recipient.phone ? `(${d.recipient.phone})` : ""}</span></div>
-        {d.recipient.id_number && <div className="kv"><label>{t("recipient_id_number")}</label><span>{d.recipient.id_number}</span></div>}
-        {report.payload.signature_png && (
-          <div className="kv"><label>{t("signature")}</label><img className="signature-image" src={report.payload.signature_png} alt="" /></div>
+        {d.recipient ? (
+          <>
+            <div className="kv"><label>{t("recipient_section")}</label><span>{d.recipient.name} {d.recipient.phone ? `(${d.recipient.phone})` : ""}</span></div>
+            {d.recipient.id_number && <div className="kv"><label>{t("recipient_id_number")}</label><span>{d.recipient.id_number}</span></div>}
+            {report.payload.signature_png && (
+              <div className="kv"><label>{t("signature")}</label><img className="signature-image" src={report.payload.signature_png} alt="" /></div>
+            )}
+          </>
+        ) : (
+          //nothing was delivered: no one received and no one signed, by the rule
+          <div className="kv"><label>{t("recipient_section")}</label><span className="muted">{t("no_handover_report")}</span></div>
         )}
       </section>
     </div>

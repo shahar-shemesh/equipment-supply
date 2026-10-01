@@ -51,7 +51,7 @@ export type ReportDisplay = {
   address_building?: string;
   address_city: string;
   items: { id: number; product_name: string; catalog_number?: string; quantity: number }[];
-  recipient: { name: string; id_number: string; phone: string };
+  recipient: { name: string; id_number: string; phone: string } | null; //null when nothing was delivered: no one received
 };
 
 export type ReportSync = {

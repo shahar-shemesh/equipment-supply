@@ -37,7 +37,8 @@ export class DeliveryConflict {
   @Column({ type: 'int', nullable: true })
   submitted_revision: number; //issuance_revision the tablet sent
 
-  @Column({ type: 'varchar' })
+  //null, like the signature, when the signed report delivered nothing: the same rule as a delivery attempt
+  @Column({ type: 'varchar', nullable: true })
   recipient_type: RecipientType;
 
   @Column({ nullable: true })
@@ -53,8 +54,8 @@ export class DeliveryConflict {
   @Column({ type: 'jsonb' })
   items: IDeliveryAttemptItem[];
 
-  @Column({ type: 'text' })
-  signature_png: string; //a real png data url, same limits as a delivery attempt. never in list responses or logs
+  @Column({ type: 'text', nullable: true })
+  signature_png: string; //a real png data url, same limits as a delivery attempt, null when nothing was delivered. never in list responses or logs
 
   @Column({ length: 64 })
   payload_hash: string; //sha256 of the validated content, the same function as delivery_operations

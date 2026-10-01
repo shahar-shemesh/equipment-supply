@@ -15,7 +15,7 @@ import { useAuth } from "../../utils/auth";
 import { displayNumber, formatDateTime } from "../../utils/format";
 import { DraftRow, LocalReport, storageError } from "../offline/db";
 import { scopeOf } from "../offline/identity";
-import { deleteDraft, getDraft, getReport, isActiveState, putDraft, readPendingIds, submitReport, subscribe, validateReportForm } from "../offline/store";
+import { deleteDraft, getDraft, getReport, isActiveState, nothingDelivered, putDraft, readPendingIds, submitReport, subscribe, validateReportForm } from "../offline/store";
 import { getSyncStatus } from "../offline/sync";
 import { useTask } from "../offline/useCourierData";
 import { ItemAnswer, ItemReportCard } from "../components/ItemReportCard";
@@ -298,6 +298,9 @@ export default function TaskDetailPage() {
   const lastAttempt = task.attempts?.slice(-1)[0];
   const closed = task.status !== TaskStatus.pending;
   const local = data.local_report;
+  //every line "not delivered": no one received, so the recipient block and the pad leave the screen and the send does
+  //not ask for them. whatever was typed or drawn before stays in the form state and comes back if a line flips again
+  const noHandover = !closed && nothingDelivered(task, answers);
   //the form waits for the draft too, so the pad mounts once with the right strokes
   if (!closed && (draft?.taskId !== taskId || formTaskId !== taskId)) return <div className="page-loading"><CircularProgress /></div>;
 
@@ -352,9 +355,16 @@ export default function TaskDetailPage() {
                   </div>
                 );
               })}
-              <div className="kv"><label>{t("recipient_section")}</label><span>{lastAttempt.recipient_name} {lastAttempt.recipient_phone ? `(${lastAttempt.recipient_phone})` : ""}</span></div>
-              {lastAttempt.signature_png && (
-                <div className="kv"><label>{t("signature")}</label><img className="signature-image" src={lastAttempt.signature_png} alt="" /></div>
+              {lastAttempt.recipient_type ? (
+                <>
+                  <div className="kv"><label>{t("recipient_section")}</label><span>{lastAttempt.recipient_name} {lastAttempt.recipient_phone ? `(${lastAttempt.recipient_phone})` : ""}</span></div>
+                  {lastAttempt.signature_png && (
+                    <div className="kv"><label>{t("signature")}</label><img className="signature-image" src={lastAttempt.signature_png} alt="" /></div>
+                  )}
+                </>
+              ) : (
+                //a report that delivered nothing has no recipient and no signature, by the rule, not by a missing field
+                <div className="kv"><label>{t("recipient_section")}</label><span className="muted">{t("no_handover_report")}</span></div>
               )}
             </>
           )}
@@ -394,6 +404,10 @@ export default function TaskDetailPage() {
             />
           ))}
 
+          {noHandover && <Alert severity="info" icon={false} className="task-detail__no-handover">{t("no_handover_form")}</Alert>}
+
+          {!noHandover && (
+          <>
           <h2 className="task-detail__section-title">{t("recipient_section")}</h2>
           <section className="task-section">
             <div className="item-report__question">{t("recipient_q")}</div>
@@ -417,6 +431,8 @@ export default function TaskDetailPage() {
           {/* keyed by task so prev / next always remounts the pad: with local data there is no loading gap between tasks
               any more and the old strokes would otherwise stay on the canvas */}
           <SignaturePad key={`${task.id}:${padKey}`} strokes={strokes} onChange={onSignature} error={errors.signature} />
+          </>
+          )}
 
           {error && <Alert severity="error">{error}</Alert>}
           {rejected && (

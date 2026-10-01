@@ -186,6 +186,9 @@ export const he = {
     signature_here: "חתימה כאן",
     signature_clear: "ניקוי חתימה",
     signature_missing: "לא התבצעה חתימה",
+    //every line "not delivered": no one received, no one signs. the form drops both sections, the read only views say why
+    no_handover_form: "לא נמסר דבר, לא נדרשים פרטי מקבל וחתימה",
+    no_handover_report: "לא נמסר דבר, ללא פרטי מקבל וחתימה",
     submit: "שליחה",
     submit_done: "השליחה הושלמה בהצלחה",
     back_home: "חזרה לדף הבית",

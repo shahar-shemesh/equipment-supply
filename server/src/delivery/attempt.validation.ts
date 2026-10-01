@@ -51,10 +51,21 @@ export function validateItemAnswers(items: { id: number }[], raw: any): ItemAnsw
 
 /*──────────────────────────────────────────────────────────────────────────*/
 
+//nothing handed over means no one received and no one signs: a report whose every line is "not delivered" needs neither
+//the recipient nor the signature. the two validators below take this flag, the callers derive it from the validated answers
+export function handedOver(answers: { delivered: boolean }[]): boolean {
+  return answers.some((a) => a.delivered);
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
 //"הלקוח/ה" copies the customer from the issuance and ignores whatever else came in the body.
-//"אדם אחר" needs all three fields, like the three required inputs on the screen
-export function validateRecipient(raw: any, customer: { customer_name: string; customer_id_number?: string; customer_phone?: string }): Recipient {
+//"אדם אחר" needs all three fields, like the three required inputs on the screen.
+//not required (nothing delivered): an absent or empty recipient_type is null, one that is there is checked as usual, so an
+//older build of the tablet that still sends the customer along is stored as before
+export function validateRecipient(raw: any, customer: { customer_name: string; customer_id_number?: string; customer_phone?: string }, required = true): Recipient | null {
   const type = raw?.recipient_type;
+  if (!required && (type == null || type === '')) return null;
   if (type !== RecipientType.customer && type !== RecipientType.other) throw new BadRequestException('recipient_type must be customer or other');
 
   if (type === RecipientType.customer) {
@@ -75,8 +86,10 @@ export function validateRecipient(raw: any, customer: { customer_name: string; c
 /*──────────────────────────────────────────────────────────────────────────*/
 
 //a png data url, valid base64, at most 1MB decoded, and it really starts with the png magic bytes so a renamed jpeg or a
-//text blob cannot be stored as a signature. an empty canvas still makes a valid png, that check stays on the screen
-export function validateSignature(raw: any): string {
+//text blob cannot be stored as a signature. an empty canvas still makes a valid png, that check stays on the screen.
+//not required (nothing delivered): absent or empty is null, anything else still has to be a real png
+export function validateSignature(raw: any, required = true): string | null {
+  if (!required && (raw == null || raw === '')) return null;
   if (typeof raw !== 'string' || !raw.startsWith(PNG_PREFIX)) throw new BadRequestException('signature_png must be a png data url');
   const b64 = raw.slice(PNG_PREFIX.length);
   if (!b64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) throw new BadRequestException('signature is not valid base64');

@@ -114,9 +114,16 @@ export function ConflictDetailDialog({ id, onClose, onChanged }: Props) {
                   </div>
                 );
               })}
-              <div className="kv"><label>{t("recipient_section")}</label><span>{c.recipient_name || "-"} {c.recipient_phone ? `(${c.recipient_phone})` : ""}</span></div>
-              {c.recipient_id_number && <div className="kv"><label>{t("recipient_id_number")}</label><span>{c.recipient_id_number}</span></div>}
-              {c.signature_png && <div className="kv"><label>{t("signature")}</label><img className="signature-image" src={c.signature_png} alt="" /></div>}
+              {c.recipient_type ? (
+                <>
+                  <div className="kv"><label>{t("recipient_section")}</label><span>{c.recipient_name || "-"} {c.recipient_phone ? `(${c.recipient_phone})` : ""}</span></div>
+                  {c.recipient_id_number && <div className="kv"><label>{t("recipient_id_number")}</label><span>{c.recipient_id_number}</span></div>}
+                  {c.signature_png && <div className="kv"><label>{t("signature")}</label><img className="signature-image" src={c.signature_png} alt="" /></div>}
+                </>
+              ) : (
+                //the courier delivered nothing: no recipient and no signature were asked for, so none are missing here
+                <div className="kv"><label>{t("recipient_section")}</label><span className="muted">{t("no_handover_report")}</span></div>
+              )}
             </section>
 
             <div className="conflict-dialog__states">

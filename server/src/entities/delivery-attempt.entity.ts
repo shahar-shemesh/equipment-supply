@@ -21,7 +21,9 @@ export class DeliveryAttempt {
   @Column({ type: 'varchar' })
   outcome: AttemptOutcome;
 
-  @Column({ type: 'varchar' })
+  //all null when the outcome is not_delivered: nothing was handed over, so no one received and no one signed.
+  //a delivered or partially delivered attempt always has a recipient type and a signature
+  @Column({ type: 'varchar', nullable: true })
   recipient_type: RecipientType;
 
   @Column({ nullable: true })
@@ -33,8 +35,8 @@ export class DeliveryAttempt {
   @Column({ nullable: true })
   recipient_phone: string;
 
-  //png data url straight from the canvas. the spec asks for a restricted file storage with the issuance id + timestamp,
-  //that is a later step, for now the db holds it
+  //png data url straight from the canvas, null when nothing was delivered. the spec asks for a restricted file storage
+  //with the issuance id + timestamp, that is a later step, for now the db holds it
   @Column({ type: 'text', nullable: true })
   signature_png: string;
 

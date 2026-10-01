@@ -184,6 +184,34 @@ describe('keeping a rejected report', () => {
         expect((await deliveryState(f.issuance.id)).conflicts).toBe(0);
     });
 
+    it('a rejected report that delivered nothing is kept without a recipient and a signature', async () => {
+        const f = await fixture();
+        await reassign(f);
+        const bare = { items: otherReport(f).items, operation_id: OP_A, issuance_revision: 1, client_reported_at: '2026-09-29T08:00:00.000Z' };
+        expect((await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, bare)).status).toBe(409);
+
+        const kept = await post(`/api/delivery/tasks/${f.task.id}/conflicts`, f.courierToken, bare);
+        expect(kept.status).toBe(201);
+        expect(kept.body.kind).toBe('conflict_recorded');
+        const row = await ds.getRepository(DeliveryConflict).findOne({ where: { id: kept.body.conflict_id } });
+        expect(row).toMatchObject({ recipient_type: null, recipient_name: null, recipient_id_number: null, recipient_phone: null, signature_png: null, rejection_code: ReportConflictCode.task_cancelled });
+        expect(row.items.every((i) => i.delivered === false)).toBe(true);
+
+        //the same bare body again is the replay, not a reused id: the hash is stable with the nulls
+        const again = await post(`/api/delivery/tasks/${f.task.id}/conflicts`, f.courierToken, bare);
+        expect(again.status).toBe(201);
+        expect(again.body).toMatchObject({ conflict_id: kept.body.conflict_id, replayed: true });
+
+        //a partial report without a signature is still refused here too
+        const partial = { ...bare, operation_id: OP_B, items: [{ item_id: f.itemIds[0], delivered: true }, { item_id: f.itemIds[1], delivered: false, reason: NonDeliveryReason.nobody_home, reason_details: 'x' }] };
+        expect((await post(`/api/delivery/tasks/${f.task.id}/conflicts`, f.courierToken, partial)).status).toBe(400);
+
+        const detail = await get(`/api/conflicts/${kept.body.conflict_id}`, f.managerToken);
+        expect(detail.status).toBe(200);
+        expect(detail.body.conflict).toMatchObject({ recipient_type: null, signature_png: null });
+        expect((await deliveryState(f.issuance.id)).conflicts).toBe(1);
+    });
+
     it('a report that could still be applied is not evidence of anything', async () => {
         const f = await fixture();
         const res = await post(`/api/delivery/tasks/${f.task.id}/conflicts`, f.courierToken, report(f));

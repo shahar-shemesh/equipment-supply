@@ -5,7 +5,7 @@ import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 
-import { IDeliveryTask, IssuanceStatus, TaskStatus } from "../../../../shared/@core";
+import { IDeliveryTask, IssuanceStatus, ReportSyncState, TaskStatus } from "../../../../shared/@core";
 import { StatusBadge } from "../../components/StatusBadge";
 import { displayNumber, fullAddress } from "../../utils/format";
 import { SyncChip } from "./SyncChip";
@@ -14,6 +14,14 @@ import { SyncChip } from "./SyncChip";
 //a report saved on this device already moved task.status and issuance.status (the overlay in the data layer)
 function cardStatus(task: IDeliveryTask) {
   return task.status === TaskStatus.pending ? IssuanceStatus.assigned : task.issuance.status;
+}
+
+//the chip next to the badge says only what the courier still has to care about: the report is on this device only, or
+//the server refused it. a report the server took is the normal ending and the task screen says so, the board does not
+function cardChip(task: IDeliveryTask) {
+  const r = task.local_report;
+  if (!r || r.state === ReportSyncState.synced) return null;
+  return <SyncChip state={r.state} short />;
 }
 
 export function TaskCard({ task }: { task: IDeliveryTask }) {
@@ -32,7 +40,7 @@ export function TaskCard({ task }: { task: IDeliveryTask }) {
       </div>
       <div className="task-card__status">
         <StatusBadge status={cardStatus(task)} />
-        {task.local_report && <SyncChip state={task.local_report.state} short />}
+        {cardChip(task)}
       </div>
     </div>
   );
@@ -72,7 +80,7 @@ export function TaskGroupCard({ tasks }: { tasks: IDeliveryTask[] }) {
           <div className="task-card__number">{displayNumber(task.issuance)}</div>
           <div className="task-card__status">
             <StatusBadge status={cardStatus(task)} />
-            {task.local_report && <SyncChip state={task.local_report.state} short />}
+            {cardChip(task)}
           </div>
         </div>
       ))}

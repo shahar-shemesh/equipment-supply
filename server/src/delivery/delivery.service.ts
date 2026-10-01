@@ -6,7 +6,7 @@ import { IAttemptResult, IssuanceStatus, ReportConflictCode, TaskStatus } from '
 import { normalizeSapNumber } from '../../../shared/@utils';
 import { DeliveryTask, DeliveryAttempt, Issuance, DeliveryOperation } from '../entities';
 import { lockIssuance } from '../issuances/issuances.service';
-import { outcomeOf, validateItemAnswers, validateRecipient, validateSignature } from './attempt.validation';
+import { handedOver, outcomeOf, validateItemAnswers, validateRecipient, validateSignature } from './attempt.validation';
 import { isOperationUniqueViolation, parseClientTime, payloadHash, validateIssuanceRevision, validateOperationId } from './operation';
 
 //every 409 of the report route carries a code from ReportConflictCode, the tablet shows a hebrew line per code.
@@ -111,9 +111,10 @@ export class DeliveryService {
     if (!operationId && task.status !== TaskStatus.pending) throw conflict('task already closed', ReportConflictCode.task_closed);
 
     const answers = validateItemAnswers(task.issuance.items, body?.items);
-    const recipient = validateRecipient(body, task.issuance);
-    const signature = validateSignature(body?.signature_png);
     const outcome = outcomeOf(answers);
+    //a report that delivered nothing has no one to sign: recipient and signature are optional then and stored as null
+    const recipient = validateRecipient(body, task.issuance, handedOver(answers));
+    const signature = validateSignature(body?.signature_png, handedOver(answers));
     const clientReportedAt = parseClientTime(body?.client_reported_at);
     //hashed after validation, so a retry that trims a name differently is still the same report
     const hash = operationId ? payloadHash({ task_id: task.id, recipient, signature_png: signature, items: answers }) : null;
@@ -143,10 +144,10 @@ export class DeliveryService {
         const attempt = em.create(DeliveryAttempt, {
           task_id: task.id,
           outcome,
-          recipient_type: recipient.type,
-          recipient_name: recipient.name,
-          recipient_id_number: recipient.id_number,
-          recipient_phone: recipient.phone,
+          recipient_type: recipient?.type ?? null,
+          recipient_name: recipient?.name ?? null,
+          recipient_id_number: recipient?.id_number ?? null,
+          recipient_phone: recipient?.phone ?? null,
           signature_png: signature,
           client_reported_at: clientReportedAt,
           items: answers,
