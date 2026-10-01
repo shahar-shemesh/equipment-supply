@@ -527,6 +527,7 @@
 // find dialog
 .find-dialog {
     &__camera {
+        overflow: hidden;
         background: var(--color-primary-light);
         border-radius: 12px;
         height: 200px;
@@ -540,11 +541,10 @@
         font-size: 13px;
     }
 
-    &__frame {
-        width: 110px;
-        height: 110px;
-        border: 2px dashed var(--color-text-secondary);
-        border-radius: 8px;
+    &__camera video {
+        width: 100%;
+        height: 100%;
+        object-fit: contain; //show the same image the decoder sees
     }
 
     .MuiAlert-root {
