@@ -24,6 +24,7 @@
 - `/pre-push`: tsc, tests, `npm audit`, secrets and two review subagents, then a `PUSH` / `FIX FIRST` verdict.
 - `/refresh-agents-md`: re-verify `AGENTS.md` against the code after a wave of changes.
 - `/handoff`: write the resume file.
+- `/task <desc>`: open a Jira task in project ES under an epic, in the current sprint. `/task build <desc>` also runs branch, `/build`, `/pre-push`, push and PR, then waits for "merge". Ids live in `.claude/skills/task/references/jira.md`.
 - The built-in `/code-review`, `/security-review` and `/simplify` complement them. Run `/security-review` on anything touching auth, payload validation or the delivery report route.
 
 ### Git
