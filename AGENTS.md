@@ -2,7 +2,7 @@
 
 ## equipment-supply
 
-Digital equipment issuance system for the Israeli Ministry of Defense: a warehouse manager assigns SAP issuances to couriers, couriers deliver from a tablet and collect a signature, also while offline. Two npm packages share one backend: `client/` (React 18, Vite, MUI 5, RTL Hebrew UI) and `server/` (NestJS 10, TypeORM 0.3, PostgreSQL 16), with the shared types and the Hebrew dictionary in `shared/`. `README.md` is the entry document and `docs/README.he.md` keeps the original Hebrew spec. Implementation plans go to `docs/plans/`.
+Digital equipment issuance system for the Israeli Ministry of Defense: a warehouse manager assigns SAP issuances to couriers, couriers deliver from a tablet and collect a signature, also while offline. Two npm packages share one backend: `client/` (React 18, Vite, MUI 5, RTL Hebrew UI) and `server/` (NestJS 10, TypeORM 0.3, PostgreSQL 16), with the shared types and the Hebrew dictionary in `shared/`. `README.md` is the entry document; the reference docs are `docs/offline-sync.md` (courier offline work, sync, rejected reports, testing the build), `docs/domain.md` (domain model, server rules, schema upgrade) and `docs/api.md`. `docs/README.he.md` keeps the original Hebrew spec. Implementation plans go to `docs/plans/`.
 
 ## Policy
 
@@ -15,7 +15,7 @@ Digital equipment issuance system for the Israeli Ministry of Defense: a warehou
 - `server/src/issuances/issuance.rules.ts`: the status transition table. A new manager action adds a row there, never an inline status check.
 - `server/src/env.ts`: the only reader of the LOCAL / production switches. New environment dependent behaviour goes through it.
 - `server/src/migrations/` and `server/src/data-source.ts`: hand written TypeORM migrations and the CLI DataSource.
-- `client/src/courier/offline/`: the IndexedDB data layer and the sync worker. Its conflict rules are deliberate, read `## Offline courier work` in `README.md` before changing them.
+- `client/src/courier/offline/`: the IndexedDB data layer and the sync worker. Its conflict rules are deliberate, read `docs/offline-sync.md` before changing them.
 
 ## Running and verifying
 
@@ -27,7 +27,7 @@ Digital equipment issuance system for the Israeli Ministry of Defense: a warehou
 - The production entry is `node dist/server/src/main.js`, not `dist/main.js`: nest-cli `sourceRoot` is `server/src` because `../shared` is compiled too.
 - The service worker exists only in the production build (`devOptions.enabled` is false in `client/vite.config.ts`). Test offline behaviour with `npm run build` and `npm run preview`, not the dev server.
 - The project runs on Node 20 (README).
-- Every change that adds or removes tests also updates the counts and descriptions under `## Tests` in `README.md`; the commit history keeps them current.
+- Every change that adds or removes tests also updates the counts under `## Tests` and `## Status` in `README.md`. Counts only: the spec files are the description.
 
 ## Conventions that differ from defaults
 

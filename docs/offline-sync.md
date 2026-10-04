@@ -1,0 +1,108 @@
+<!-- Moved out of README.md on 2026-10-04. The README keeps the entry-level summary; this file is the reference. -->
+
+# Offline courier work
+
+Login needs the server. From then on the courier screens run from local data, with or without a network: the board with its tabs, counters, search and grouping, the task screen with prev / next, the manual lookup, the report form and the send button. The manager side has no offline mode.
+
+**What is downloaded.** The complete task list, `GET /delivery/tasks?tab=all` with no search, which already carries the issuance and its items for every task, so a pending task the courier never opened has everything the report form needs. The list is replaced whole in one transaction after a shape check: the rows must be an array of tasks with numeric ids and `counts.all` must equal the number of rows, the cheap proof that the response is complete and unfiltered. A failed or malformed refresh keeps the previous snapshot, records the error and shows "הרענון נכשל" on the board. The report details of a done task (the item answers and the signature; the list rows have neither) are on the device only when the task was opened online on this device (`GET /delivery/tasks/:id` is cached then) or reported from this device; otherwise the task screen shows "פרטי הדיווח לא הורדו למכשיר" instead of the report block.
+
+A refresh runs when the courier screens open, on the רענון button in the status strip, after a sync pass that delivered at least one report, and, throttled, when the app comes back to the foreground or the network returns (at most once a minute; the board also refreshes on mount when the snapshot is older than five minutes). The strip says "מכין נתונים לעבודה ללא רשת..." until the first snapshot is stored and "מוכן לעבודה ללא רשת, עודכן ב-HH:MM" after that.
+
+**The local database.** IndexedDB `es-courier`, version 1, through the `idb` library (`client/src/courier/offline/db.ts`):
+
+| Store | Key | Holds |
+| --- | --- | --- |
+| `meta` | `scope` | readiness, the last refresh time, the last error, the persistent storage answer, the cross tab lease |
+| `tasks` | `[scope, task_id]` | the rows of the last list download plus their position |
+| `task_details` | `[scope, task_id]` | the detail body of done tasks that were opened online |
+| `drafts` | `[scope, task_id]` | the form of a report still being filled: answers, recipient, signature PNG and strokes |
+| `reports` | `[scope, operation_id]` | signed reports waiting for the server or rejected by it, with their sync state and the server's acknowledgment |
+
+`scope` is `<users.id>:<couriers.id>`; every key starts with it, every function of the data layer takes it and throws on a null one, so nothing is ever stored under an undefined account. Two accounts on one device never see each other's rows. The one cross scope read is the list of other accounts with queued work, used for the notices. Logout clears localStorage only, the database keeps everything. A future schema version adds stores and indexes in place and never deletes a store, because a queued report may be sitting in it.
+
+**Four kinds of data.** They never mix: the server snapshot (`tasks`, `task_details`, replaced on every refresh), the draft (`drafts`, the courier's unsent work), the immutable report (`reports`, frozen the moment the courier taps send; only its sync state and acknowledgment change afterwards), and the display, computed on read: a pending snapshot task with a report in queued / syncing / synced / auth is shown as done with the local attempt (answers, recipient, signature), its issuance status is the report's outcome and the board counts it under הושלם; a task whose report was rejected stays as the snapshot says and gets an attention chip; a done snapshot task keeps `local_report` for every state, so the chip survives a refresh. The board card shows the chip only while the report is still on the device or was refused; a report the server took has no chip on the board, the task screen says "התקבל בשרת". The tab counters are computed over the whole overlaid set, not the search results, as on the server.
+
+**Drafts.** Every change of the report form is written to the device 600 ms after the last keystroke, and immediately when the page is hidden, unloaded or left. The indicator says "טיוטה נשמרה במכשיר" only after the transaction committed. Completed signature strokes are part of the draft and the pad redraws them on the next open (a single tap is a dot, drawn, stored and submitted the same way). A draft write is refused once a report for that task exists in an active state, so a late timer cannot bring a draft back after send. "ניקוי הטיוטה" clears both the draft and the form.
+
+**Sending a report.** The same path online and offline: validate, generate an operation id (`crypto.randomUUID`, or a v4 from `getRandomValues` on plain http), write the report and delete the draft in one transaction, and only then update the screen and wake the worker. A task with an active report refuses a second one ("לדוח של הנפקה זו יש שליחה שממתינה לשרת"). A failed local write shows the storage reason (quota, storage unavailable, or a plain failed save) and no saved state. Two different endings: "הדוח נשלח" only when the server's acknowledgment arrives within four seconds, otherwise "הדוח נשמר במכשיר וישלח לשרת כשיהיה חיבור" (also straight away when the device is offline or waiting for a login). A report the server rejects inside those four seconds keeps the form on screen with its answers and an alert that says what the server said.
+
+**Sync states** (`ReportSyncState` in `shared/@core.ts`), a separate axis from the business status, which is the report's outcome:
+
+| State | Meaning | Retry |
+| --- | --- | --- |
+| `queued` | saved on the device, waiting for the network or for its backoff to pass | automatic, and "נסה שוב" resets the backoff |
+| `syncing` | a request is in flight | |
+| `synced` | the server acknowledged it, the acknowledgment is stored next to the report | |
+| `auth` | the server said 401, or the stored token is missing, expired or belongs to another account | after a login of the same account |
+| `invalid` | 400, the server rejected the payload; the message is kept | no, review is manual |
+| `forbidden` | 403 or 404, the task is not this courier's any more | no |
+| `conflict` | 409, the task changed under the report; the code says how (see [Unresolved reports](#unresolved-reports)) | no |
+
+Only `queued` and `auth` can be retried by hand. Network failures, timeouts, 408 / 425 / 429, 5xx and a 2xx whose body does not look like a result go back to `queued` with a backoff (30 s doubling to 15 min, plus up to 30% jitter); a reconnect, the app opening and a login clear the backoff of network failures, statuses the server actually answered keep theirs.
+
+**The sync worker** (`client/src/courier/offline/sync.ts`) runs while the courier screens are open, one per account, and only in the foreground. There is no Background Sync and nothing is promised while the app or the browser is closed: reports go out the next time the app is open with a network and a valid login. It runs a pass on start, after every send, on manual retry, when the network comes back, when the tab becomes visible or focused, when another tab asks for one, and every 60 s while something is queued or the last request failed (`navigator.onLine` is treated as a hint, a real request is the proof). Requests time out after 20 s. Reports go out in enqueue order, one at a time; a report that did not reach `synced` stops the later reports of the same task in that pass and the other tasks continue. One tab sends at a time: the pass takes a Web Lock (or a lease in `meta` where Web Locks do not exist), never for the worker's lifetime, and a tab that could not get it asks the holder to run a pass over a `BroadcastChannel`, which also tells the other tabs to re-read after every local write. A result that arrives after logout or after a switch to another account is dropped. After the reports of a pass the worker uploads the evidence of rejected reports and reads the review status of the ones the server already has, see [Unresolved reports](#unresolved-reports).
+
+**Persistent storage.** `navigator.storage.persist()` is asked once per session and the answer is shown at the bottom of the pending reports dialog. It is a request, not a guarantee: "clear site data", a manual "clear browsing data" or an eviction the browser decides on anyway still delete everything, including queued reports.
+
+**Authentication and the 12 hour token.** The JWT lasts 12 hours; the local data does not expire with it. With an expired token the board, the tasks, the drafts and the saved reports stay readable and a report can still be signed and queued. Sending needs a valid token of the same account: a 401, or a token that is missing, expired or belongs to someone else, parks every queued report in `auth` without sending anything, the strip shows "נדרשת התחברות מחדש" and tapping it stops the worker, clears localStorage and opens the login page. A new login of the same account picks the queue up on its own. Another account signing in on the same device sees "במכשיר יש N דוחות של X שטרם נשלחו לשרת" on the login page and in the strip, and its worker never sends them: the token's `sub` is compared with the report's user id before every request, and a background refresh or detail fetch of a scope is refused under another account's token, so a tab left open on the first account cannot overwrite that account's snapshot. A tab follows a login or logout made in another tab (the `storage` event) and restarts its worker for the new account. Logging out with queued or rejected reports asks for confirmation first and says the reports stay on the device.
+
+**Status strip.** Under the courier header: the connection (מחובר / אין חיבור לרשת / השרת לא זמין כרגע), the dataset (ready and the refresh time, or preparing, or never downloaded), the רענון button, the reauth action when needed, the queue ("דוח אחד ממתין לסנכרון", "מסנכרן...", "כל הדוחות התקבלו בשרת", or "דוחות שנשמרו במכשיר" to open the list), the attention count, and two notices: another account's queued work, and "עבודה ללא רשת לא זמינה בכתובת הזו" on a page that is not a secure context. Cards on the board carry a small chip next to the status badge for a task whose local report has not reached the server yet (נשמר במכשיר) or was refused (the rejection); a synced report shows no chip on the board, only on the task screen.
+
+## Unresolved reports
+
+A report the server rejected (`invalid`, `forbidden`, `conflict`) stays on the device indefinitely: nothing prunes it, there is no dismiss action, and a refresh never touches it, even when its task left the list. It is listed under דורשים טיפול in the pending reports dialog and readable in full at `/courier/reports/:operationId`: customer, address, every item answer with its reason, the recipient, the signature, the sync state and the server's message, plus "ההנפקה כבר לא מופיעה בלוח שלך" when the task is gone.
+
+A `conflict` (a 409 from the attempts route) is also handed over to the server as evidence, without ever being applied. Three things are kept apart, on the tablet and in the wording:
+
+1. A delivery report that was accepted and applied: `ReportSyncState.synced`, a row in `delivery_operations`, an attempt, a closed task.
+2. A rejected report preserved on the server for manager review: `ReportSyncState.conflict` with `EvidenceUploadState.received` or `reviewed`, a row in `delivery_conflicts`, no attempt, no change to the task or the issuance.
+3. A rejected report still stored only on the device: `ReportSyncState.conflict` with `EvidenceUploadState.none`, `pending`, `uploading` or `failed`. Until the upload lands it depends on the device's storage like any other local row.
+
+The evidence upload runs in the sync worker's pass, right after the delivery reports, through `POST /delivery/tasks/:id/conflicts` with the same body the attempts route refused (`operation_id`, `issuance_revision`, `client_reported_at` included). It reuses the queue's rules: the current token must belong to the report's account, a network failure or a 5xx backs off (30 s doubling to 15 min) and is cleared by a reconnect, a 401 pauses without touching the row, one failed upload never holds a delivery report back, one tab sends at a time. 400, 403, 404 and 409 answers mark the upload `failed` and keep the row for attention; "שליחה חוזרת לבדיקה" sends it again by hand. The rejected delivery report itself is never resent as a way of uploading evidence. Conflicts recorded before this version (rows without an `evidence` field) are uploaded like any other; the IndexedDB layout did not change for it (still version 1, the field is optional). "התקבל בשרת לבדיקת המנהל" appears only after the receipt (`kind: "conflict_recorded"`, with `conflict_id` and `received_at`) was written to the local row. On every later pass the worker asks `GET /delivery/conflicts?operation_ids=` for its received rows and moves the ones a manager reviewed to "נבדק על ידי המנהל ב-...", which also takes them out of the attention count (they stay listed under נבדקו על ידי המנהר, and on the device). The Hebrew lines, in order: "הראיות שמורות רק במכשיר הזה", "ממתין לשליחה לבדיקת המנהל", "נשלח לבדיקת המנהל...", "התקבל בשרת לבדיקת המנהל ב-...", "נבדק על ידי המנהל ב-.... דוח המסירה לא הוחל על המשלוח.", "שליחת הראיות לבדיקה נכשלה: ...".
+
+On the server the upload is validated like a delivery report (a real PNG up to 1 MB, the 2 MB body, recipient rules, both optional when every line was refused, one boolean answer per line with a reason only on a refused line) except that the answers are not matched to the issuance's current lines: they are what was signed, and the lines may have changed since. It is then decided under the same locks as the attempts route (issuance, then task). A stored success for that operation wins and is returned as `{ kind: "delivered", ...IAttemptResult, replayed: true }`: a device that lost a 201 never files a false conflict. A stored conflict replays its receipt. A report that could still be applied (task pending, issuance assigned, revision current) is refused with 409 `not_a_conflict` and nothing is recorded. Anything else is recorded once with the state observed at that moment (`observed`: task status, issuance status and revision, the open task and its courier if any, the attempt that closed the task if any); the same id with other content is 409 `operation_reused`; a unique index on (`user_id`, `operation_id`) and the same rollback safe re-read as `delivery_operations` cover two concurrent uploads. Unauthenticated, wrong role, another courier's task or a malformed body never produce a row (401, 403, 404, 400). Signatures are never in list responses or log lines.
+
+Managers read the evidence under דוחות לבדיקה (`/manager/conflicts`, `GET /conflicts` paged, pending or reviewed): issuance, courier, reason, device time, server time, review. Opening a row (`GET /conflicts/:id`) loads the signature and the answers next to two states: the one recorded at rejection and the one right now (issuance status and revision, every task of the issuance with its courier, the attempt that really closed the rejected report's task, without its signature). "סימון כנבדק" (`POST /conflicts/:id/review`) needs a note and the `review_version` the screen loaded; it stores the reviewer and the time and nothing else. A row another manager already reviewed answers 409 `review_conflict` with that review instead of taking a second note, a stale version is refused the same way, and the same manager repeating the same note gets the same answer. The review changes neither the task, the attempt, the issuance nor the submitted evidence, and is labelled as a review, never as an approval: there is no force apply, merge, reassignment or reopening here. The courier sees only their own rows' status (`GET /delivery/conflicts`), never the note, and never another courier's evidence. Rows in `delivery_conflicts` are never deleted by the application.
+
+The conflict codes and what the tablet says:
+
+| `code` | When | Hebrew |
+| --- | --- | --- |
+| `task_closed` | the task was already reported, from another device or through a second operation id | ההנפקה כבר דווחה ממכשיר אחר |
+| `task_cancelled` | the task was cancelled meanwhile: reassigned, self pickup, deleted | ההנפקה הועברה למשנע אחר, לאיסוף עצמי או נמחקה |
+| `issuance_not_assigned` | the issuance is not in the `assigned` status any more | ההנפקה כבר לא בסטטוס שמאפשר דיווח |
+| `revision_changed` | the issuance revision moved since the snapshot | פרטי ההנפקה השתנו מאז ההורדה למכשיר |
+| `operation_reused` | the same operation id was already used with different content | מזהה הדיווח כבר בשימוש עם תוכן אחר |
+
+Reassignment to the same courier (the manager moves the date by assigning again) creates a new task and cancels the old one, so a report queued against the old task is a `task_cancelled` conflict on purpose: a queued report is never retargeted to a newly assigned task, the courier signed for that task and the manager decides what the new one means.
+
+Synced reports are kept for 30 days after the acknowledgment so the task screen can show the signature offline, then pruned on the next refresh, or earlier when their task leaves the list.
+
+## What invalidates a report
+
+`issuances.revision` (integer, default 1) is the concurrency token. It is bumped, inside the existing locked transactions, by assign, self pickup, delete and a delivery report. Priority, delivery date and notes edits and mark urgent do not bump it: those are harmless for a report, and a report written before such an edit is still applied. The tablet stores the revision with the snapshot and sends it back with the report; a different number is a 409 `revision_changed` and nothing is written.
+
+Today every bump also cancels or closes the task, so the task check fires first (`task_cancelled` / `task_closed`) and the revision check cannot be reached through a real flow. It is a forward guard for bump sources that leave the task alone, such as item or customer changes from SAP once that interface exists; the e2e test sends a fabricated stale number to cover it. Client timestamps play no part in conflict resolution: `client_reported_at` is stored for the record, `reported_at` stays the server receipt time.
+
+## HTTPS and testing the build
+
+Service workers, `crypto.randomUUID`, Web Locks and `navigator.storage.persist` exist only in a secure context: https, or `localhost`. A tablet opening `http://<lan-ip>:5173` (the reason for `server.host: true` in `vite.config.ts`) gets none of them: the status strip says "עבודה ללא רשת לא זמינה בכתובת הזו", offline reload does not work, and the fallbacks take over for the rest (a v4 uuid from `getRandomValues`, the lease in `meta` instead of a Web Lock, no persistence request). The data layer and the sync worker still work there, so reports queue and send; what is missing is the app shell offline.
+
+To test on a tablet, give the dev server or the preview a certificate. With [mkcert](https://github.com/FiloSottile/mkcert):
+
+```bash
+mkcert -install
+mkcert localhost 192.168.1.20     # the machine's lan address, files land in the current directory
+```
+
+Point `CLIENT_TLS_KEY` and `CLIENT_TLS_CERT` at the two files (PowerShell: `$env:CLIENT_TLS_KEY="...\localhost+1-key.pem"`, `$env:CLIENT_TLS_CERT="...\localhost+1.pem"`) and run `npm run dev` or `npm run preview`; `vite.config.ts` turns https on for both when both files exist, and leaves it off otherwise. The tablet needs the mkcert root installed to trust it.
+
+The service worker is registered from the production build only, so the offline shell is tested against the build:
+
+```bash
+cd client && npm run build && npm run preview
+```
+
+`npm run preview` serves `dist/` on http://localhost:4173 and forwards `/api` to the NestJS server on port 3000 (the preview proxy is the same object as the dev proxy; `API_PROXY_TARGET=http://localhost:3002` points both at another instance, for example one started with `DB_NAME=equipment_supply_test PORT=3002` so a browser check never touches the development data). Then: log in as a courier, wait for "מוכן לעבודה ללא רשת" in the strip, open DevTools, Network, Offline, and reload `/courier` and a direct `/courier/tasks/:id`; both come from the service worker and the local database. `/api` is excluded from the HTML navigation fallback and no API response is ever cached by the worker; the courier's data lives in the account scoped database only.
+
+Service worker updates are automatic and silent: a new build is downloaded in the background and applied with a reload as soon as the device has it, nothing is asked of the courier and nothing is shown. The one exception is an open report form (`TaskDetailPage` on a pending task holds the update through `holdUpdate` in `client/src/courier/offline/sw.ts`): the build waits and is applied the moment that screen is left or the task closes, so a signature half drawn never vanishes. Drafts and queued reports live in IndexedDB and survive the reload; a request in flight is resent with the same operation id by the next worker start. The manifest (`name`, `short_name`, `lang: he`, `dir: rtl`, `start_url: /courier`, `display: standalone`) has one SVG icon, `client/public/icon.svg` (the emblem in white on the primary blue, square because Chrome's install banner refuses other shapes). No raster icons and no iOS home screen icon were produced; iOS ignores manifest icons.

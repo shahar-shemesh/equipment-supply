@@ -4,7 +4,7 @@
 
 ### Context budget
 
-- `README.md` is 56 KB. Never read it whole. Find the heading with grep and read that section only; `AGENTS.md` above already says where things are.
+- Read documentation by section, never a whole file. `README.md` is the entry; the deep material is in `docs/offline-sync.md`, `docs/domain.md` and `docs/api.md`. Grep the heading, read that section. `AGENTS.md` above already says where things are.
 - A search that may touch many files goes to an Explore subagent. Only its conclusion comes back into this context.
 - Run test suites with the output piped through `tail -40`. On a failure read only that spec's block, not the whole log.
 - Do not re-read a file already in context. Never cat `node_modules`, `dist` or `design/`.
