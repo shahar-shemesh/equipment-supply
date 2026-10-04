@@ -21,11 +21,11 @@
 
 - `/build`: plan, implement, two independent review subagents, present. For any feature, bug or change beyond a mechanical edit.
 - `/qa-e2e-tests`: add API and e2e tests for features that already exist.
-- `/pre-push`: scan everything about to be pushed (tsc, tests, `npm audit`, secrets, two review subagents) and give a `PUSH` / `FIX FIRST` verdict. The PreToolUse hook `.claude/hooks/pre-push-guard.sh` blocks a push until it has passed on the current HEAD and written `.claude/pre-push-ok`.
+- `/pre-push`: tsc, tests, `npm audit`, secrets and two review subagents, then a `PUSH` / `FIX FIRST` verdict.
 - `/refresh-agents-md`: re-verify `AGENTS.md` against the code after a wave of changes.
 - `/handoff`: write the resume file.
 - The built-in `/code-review`, `/security-review` and `/simplify` complement them. Run `/security-review` on anything touching auth, payload validation or the delivery report route.
 
 ### Git
 
-- Never commit or push unless asked. A push always goes through `/pre-push` first; the hook enforces it. When asked, stage only the files of the task; this working tree often holds another session's uncommitted work.
+- Never commit or push unless asked. A push always goes through `/pre-push` first; the hook `.claude/hooks/pre-push-guard.sh` blocks it until the skill has written `.claude/pre-push-ok` for the current HEAD. When asked, stage only the files of the task; this working tree often holds another session's uncommitted work.

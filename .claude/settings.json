@@ -10,10 +10,13 @@
       "Bash(docker compose ps *)",
       "Bash(docker compose logs *)",
       "Bash(docker compose up -d)",
-      "Bash(npm audit*)",
       "Bash(npx tsc --noEmit*)",
       "Bash(git fetch origin --quiet)",
-      "Bash(git merge-base *)"
+      "Bash(git merge-base *)",
+      "Bash(npm audit)",
+      "Bash(npm audit --omit=dev --audit-level=high)",
+      "Bash(npm audit --json)",
+      "Bash(npm outdated)"
     ]
   },
   "hooks": {
@@ -32,7 +35,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|PowerShell",
         "hooks": [
           {
             "type": "command",

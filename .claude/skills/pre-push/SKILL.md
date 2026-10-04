@@ -26,13 +26,13 @@ git log --oneline $base..HEAD
 git status --porcelain
 ```
 
-- Nothing in the range and a clean tree: say "nothing to push" and stop.
-- Untracked files are part of the scan: `git add -N <paths>` before the diff, `git reset <paths>` right after. Only those paths, never a blanket reset.
+- Nothing in the range: say "nothing to push" and stop.
+- The push set is `$base..HEAD`, committed work only. Uncommitted or untracked files are not pushed and are not scanned; if the tree is dirty, list those paths under Warnings as "not in the push set" so the user knows they stay behind (this tree often holds another session's work; never stage or reset them).
 - Write the review diff once, without lockfiles, generated docs and design exports:
 
 ```sh
 out=<scratchpad>/pre-push/$(git rev-parse --short HEAD); mkdir -p $out
-git diff $base -- . ':!*package-lock.json' ':!design' ':!docs/README.he.md' > $out/review.diff
+git diff $base HEAD -- . ':!*package-lock.json' ':!design' ':!docs/README.he.md' > $out/review.diff
 ```
 
 - Touched packages: `client/` if the diff has `client/` or `shared/` paths, `server/` likewise. Layer A runs per touched package only.
@@ -42,10 +42,10 @@ git diff $base -- . ':!*package-lock.json' ':!design' ':!docs/README.he.md' > $o
 Run inside each touched package, output to `$out/<check>.log`, only `tail -15` into context. Collect results; do not stop on the first failure.
 
 1. **Types**: `npx tsc --noEmit -p tsconfig.json`. Blocker on non-zero exit.
-2. **Tests**: `npm test` in `client/`; `npm run test:unit` in `server/`. If the diff touches `server/src` outside tests and `docker compose ps` shows the database up, also `npm run test:e2e`; otherwise write "e2e skipped: database down" in the report. Blocker on any failing spec; read only that spec's block from the log.
+2. **Tests**: `npm test` in `client/`; `npm run test:unit` in `server/`. If the diff touches `server/src`, also `npm run test:e2e`: run `docker compose up -d` first and wait until `docker compose ps` shows the database healthy; if it still is not, write "e2e skipped: database down" as a **warning**, since the e2e specs are the server's main safety net. Blocker on any failing spec; read only that spec's block from the log.
 3. **Dependency audit**, both packages regardless of what the diff touched, since `package-lock.json` changes hide in merges:
-   - `npm audit --omit=dev --audit-level=high`: non-zero exit is a **blocker**. Runtime code with a known high or critical hole does not ship.
-   - `npm audit --json` summarised by severity with the top-level package names: **informational**, listed under "dev tooling" in the report. Today's baseline (2026-10-04): client 7 (vite, vitest), server 53 (jest, nest-cli). Only a rise above the last report is worth a line.
+   - `npm audit --omit=dev --audit-level=high`: non-zero exit is a **blocker** when the range changes that package's `package.json` or `package-lock.json`, or when the failing advisory is fixable by a plain `npm audit fix` (no `--force`). Otherwise it is a **warning** that names the packages and repeats on every run until the dependencies are upgraded: the hole is already on `main` and this push does not widen it, but it must stay visible. Baseline 2026-10-04: server fails on `@nestjs/core`, `body-parser`, `multer`, `qs`, `uuid`, `file-type`; client passes.
+   - `npm audit --json` summarised by severity with the top-level package names: **informational**, listed under "dev tooling" in the report. Baseline (2026-10-04): client 7 (vite, vitest), server 53 (jest, nest-cli). This line is the single record of the baseline; a count above it gets a line in the report and the new number is written here in the same commit.
    - `npm outdated` on direct dependencies that are a **major** version behind: informational, one line per package, no recommendation to upgrade inside this skill.
    - Offline (`npm audit` fails with ENOTFOUND or similar): write "audit skipped: offline" and treat as a warning, not a pass.
 4. **Secrets and leftovers** over added lines only (`grep '^+' $out/review.diff | grep -v '^+++'`):
@@ -54,7 +54,7 @@ Run inside each touched package, output to `$out/<check>.log`, only `tail -15` i
 5. **Repo rules that a grep can check**:
    - a change under `server/src/**/*.entity.ts` without a new file in `server/src/migrations/`: blocker (AGENTS.md: every entity change needs a migration).
    - a spec file added or deleted without a change to `README.md`: warning (the `## Tests` counts must follow).
-   - a string literal with Hebrew characters added in `client/src` outside `shared/i18n/he.ts`: warning (every UI string goes through `t()`).
+   - a Hebrew string literal added under `client/src` outside `*.spec.ts*` files: warning (every UI string goes through `t()`; specs locate elements by Hebrew text and are exempt).
 
 ## Layer B: two review subagents
 
@@ -63,7 +63,7 @@ Launch both in parallel, each with no conversation context, each told: "Do not i
 - `review-prompts/bugs.md`: correctness. Things that produce a wrong result, a crash, a lost write, a race, a broken offline sync rule.
 - `review-prompts/practices.md`: bad practice and security hygiene against `AGENTS.md` conventions and the project's security model.
 
-Both return at most 10 findings, each with severity (`blocker`, `warning`, `nit`), `file:line`, one sentence on the defect and one on how to confirm it.
+Both return at most 10 findings, each with severity (`blocker`, `warning`, `nit`), `file:line`, one sentence on the defect or issue and one on how to confirm or fix it.
 
 ## Layer C: triage and report
 
@@ -76,14 +76,14 @@ Both return at most 10 findings, each with severity (`blocker`, `warning`, `nit`
 **Verdict:** PUSH | FIX FIRST
 
 ## Blockers
-- file:line — defect — how to confirm
+- file:line — defect or issue — how to confirm or fix
 
 ## Warnings
-- ...
+- ... (includes paths not in the push set, a skipped e2e run, pre-existing runtime advisories)
 
 ## Dependencies
-- runtime audit: client clean / server clean (or the advisory)
-- dev tooling: client N (top packages), server N (top packages); baseline 2026-10-04: 7 / 53
+- runtime audit: client clean / server clean (or the advisory names)
+- dev tooling: client N (top packages), server N (top packages), against the baseline in SKILL.md
 - major versions behind: ...
 
 ## Refuted
@@ -94,7 +94,7 @@ Both return at most 10 findings, each with severity (`blocker`, `warning`, `nit`
 ```
 
 3. Verdict rule: any blocker is `FIX FIRST`. Warnings alone are `PUSH`, listed so the user can decide.
-4. On `PUSH`, write the marker the hook checks: `git rev-parse HEAD > .claude/pre-push-ok`. On `FIX FIRST`, do not write it. If the user later says "push anyway", say which blockers are being pushed, write the marker, then push.
+4. On `PUSH`, write the marker the hook checks, from the repo root since the shell's cwd may still be inside a package: `git rev-parse HEAD > "$(git rev-parse --show-toplevel)/.claude/pre-push-ok"`. On `FIX FIRST`, do not write it. If the user later says "push anyway", say which blockers are being pushed, write the marker, then push.
 5. Fixing a blocker changes HEAD; the marker is stale by design. Re-run Layer A for the touched package and only the reviewer whose finding was fixed, then write the marker.
 
 ## In chat
