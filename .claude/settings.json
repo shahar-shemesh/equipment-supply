@@ -9,7 +9,11 @@
       "Bash(docker compose ps)",
       "Bash(docker compose ps *)",
       "Bash(docker compose logs *)",
-      "Bash(docker compose up -d)"
+      "Bash(docker compose up -d)",
+      "Bash(npm audit*)",
+      "Bash(npx tsc --noEmit*)",
+      "Bash(git fetch origin --quiet)",
+      "Bash(git merge-base *)"
     ]
   },
   "hooks": {
@@ -22,6 +26,19 @@
             "command": "f=\"${CLAUDE_PROJECT_DIR:-.}/.claude/handoff.md\"; if [ -f \"$f\" ]; then printf '## Handoff from the previous session (.claude/handoff.md)\\n\\n'; cat \"$f\"; fi 2>/dev/null || true",
             "timeout": 10,
             "statusMessage": "Loading handoff"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/pre-push-guard.sh\"",
+            "timeout": 10,
+            "statusMessage": "Checking pre-push marker"
           }
         ]
       }
