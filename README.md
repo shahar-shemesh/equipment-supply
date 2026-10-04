@@ -25,7 +25,7 @@ What runs today:
 - Courier board with tabs and search, grouped cards for the same address, the delivery report (per item delivered / not delivered with a reason; recipient and signature only when at least one item was delivered), lookup by issuance number.
 - Courier work without a network: the task list is downloaded to the device, drafts and signed reports live in IndexedDB, a sync worker sends queued reports with an operation id the server treats as idempotent, a service worker serves the built app offline. See [Offline courier work](docs/offline-sync.md).
 - NestJS API with role based access, server side validation of the delivery report, status transition rules, row locking for concurrent requests, idempotent delivery reports.
-- PostgreSQL schema with three migrations, a seed with 30 sample issuances, 158 tests (86 server, 72 client).
+- PostgreSQL schema with three migrations, a seed with 30 sample issuances, 163 tests (91 server, 72 client).
 - Responsive layout for phone, tablet and desktop.
 
 What does not exist: the SAP interface, history and analytics screens, PDF / SMS / email confirmations, the courier Excel import, production authentication, synchronization while the app is closed (no Background Sync), raster and iOS home screen icons, any way for a manager to apply, merge or reassign a rejected report (the manager can read it and mark it reviewed, see [Unresolved reports](docs/offline-sync.md#unresolved-reports)). Details under [Sample data and what is missing](#sample-data-and-what-is-missing).
@@ -148,7 +148,7 @@ cd server && npm run test:unit   # no database needed
 cd client && npm test
 ```
 
-Server: 86 tests in 9 suites (jest). The unit specs next to the code cover the payload validation, the transition table, the courier form validation, the issuance lookup and `delivery/operation.ts` without a database. `src/e2e/` boots the real application with supertest against `equipment_supply_test` (created on first run): the delivery report and its rules, the offline sync route with operation ids, the evidence of rejected reports and its manager review, courier management.
+Server: 91 tests in 9 suites (jest; 47 unit, 44 e2e). The unit specs next to the code cover the payload validation, the transition table, the courier form validation, the issuance lookup and `delivery/operation.ts` without a database. `src/e2e/` boots the real application with supertest against `equipment_supply_test` (created on first run): the delivery report and its rules, the offline sync route with operation ids, the evidence of rejected reports and its manager review, courier management.
 
 Client: 72 tests in 7 files (vitest on jsdom with `fake-indexeddb`, see `client/src/test/setup.ts`), no browser. They cover the offline data layer (`db`, `store`, `refresh`, `sync`), the service worker update hold (`sw`) and two components (`FindNumberDialog`, `QrCamera`).
 
