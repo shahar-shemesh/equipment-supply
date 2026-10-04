@@ -145,3 +145,6 @@ vite.config.ts.timestamp-*
 
 
 design/
+# Claude Code: per-machine files
+.claude/settings.local.json
+.claude/handoff.md

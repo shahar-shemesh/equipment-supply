@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"${CLAUDE_PROJECT_DIR:-.}/.claude/handoff.md\"; if [ -f \"$f\" ]; then printf '## Handoff from the previous session (.claude/handoff.md)\\n\\n'; cat \"$f\"; fi 2>/dev/null || true",
+            "timeout": 10,
+            "statusMessage": "Loading handoff"
+          }
+        ]
+      }
+    ]
+  }
+}
