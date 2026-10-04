@@ -2,8 +2,9 @@
 
 Looked up once so the skill never has to discover them again. If a call fails with
 "field not found" or "transition not available", re-discover with the Atlassian MCP
-(`listJiraProjectIssueTypesMetadata`, `getJiraIssueTypeMetaWithFields`,
-`listJiraIssueTransitions`, `getJiraBoardSprintData`) and update this file.
+through `executeRead` (operation names `listJiraProjectIssueTypesMetadata`, `getJiraIssueTypeMetaWithFields`,
+`listJiraIssueTransitions`, `getJiraBoardSprintData`) and update this file. SKILL.md names
+fields and transitions by role only, so this file is the single copy of every number.
 
 ## Site
 
@@ -13,7 +14,7 @@ Looked up once so the skill never has to discover them again. If a call fails wi
 | cloudId | `41ec62c7-bc0d-4886-8b53-730e95ae5547` |
 | Project | Equipment Supply, key `ES`, id `11743` |
 | Board | 714 "Dror Dev Team board" (scrum, filed under project AGILE). Its filter 11045 includes Equipment Supply. |
-| Current user (drormu) accountId | `712020:b8c5a2df-943e-4bd7-a10f-0596604fb32e` |
+| Current user | resolve at run time with `atlassianUserInfo`; never hard-code an accountId |
 | Issue URL | `https://mod-malan.atlassian.net/browse/<KEY>` |
 
 ## Issue types in ES
@@ -33,8 +34,8 @@ Looked up once so the skill never has to discover them again. If a call fails wi
 |---|---|---|
 | Parent (epic) | `parent` | top-level `parent: "ES-<n>"` |
 | Sprint | `customfield_10020` | prefer `assignToSprint: "<numeric sprint id>"` |
-| צוות (team, group picker) | `customfield_10364` | `{"name": "Dror Musai's Dev Team"}` (groupId `07e5447f-2e68-4f9f-9058-54c75c62cc13`) |
-| בודק/ת QA (user picker) | `customfield_10053` | accountId, only when the user names a tester |
+| צוות (team, group picker) | `customfield_10364` | `{"name": "Dror Musai's Dev Team"}` |
+| בודק/ת QA (user picker) | `customfield_10053` | accountId, only when the user names a tester; resolve with `executeRead` name `listJiraIssueAssignableUsers`, inputs `{projectKeyOrId: "ES", query: "<name>"}` |
 | Acceptance Criteria | `customfield_10539` | plain text |
 | DOD / DOR | `customfield_10537` / `customfield_10538` | plain text |
 | Priority | `priority` | `Blocker`, `High`, `Medium` (default), `Low` |
@@ -45,10 +46,10 @@ whatever the project default is (ES-2 came out as "abra team"), so always set it
 ## Sprint
 
 The active sprint changes every two weeks, so resolve it at run time:
-`getJiraBoardSprintData` with `boardId: "714"`, `includeIssues: false` →
+`executeRead` with name `getJiraBoardSprintData`, inputs `{boardId: "714", includeIssues: false}` →
 `resolvedSprint.id`. Sprint names follow `Dror-YY-MM-DD` (7930 = Dror-26-10-04).
 
-## Transitions (ES Task workflow, ids stable, all available from any status)
+## Transitions (ES Task workflow, ids stable, all available from any status; other issue types may differ)
 
 | Transition | id | Leads to status |
 |---|---|---|
@@ -67,8 +68,5 @@ with transition 6.
 
 ## Epics
 
-| Key | Summary |
-|---|---|
-| ES-3 | ניהול אתר וממשק שליחים (umbrella for the whole system) |
-
-List the open ones at run time: `project = ES AND issuetype = Epic AND statusCategory != Done`.
+Listed at run time: `project = ES AND issuetype = Epic AND statusCategory != Done`.
+ES-3 "ניהול אתר וממשק שליחים" is the umbrella epic for the whole system.
