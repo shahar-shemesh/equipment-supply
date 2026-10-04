@@ -14,7 +14,7 @@ import "./styles/index.scss";
 
 i18n.use(initReactI18next).init(Translation as any);
 
-//the offline shell (built app only, the dev server has no worker). prompt mode: an update waits for the עדכון button
+//the offline shell (built app only, the dev server has no worker). a new build applies itself at the next quiet moment, see sw.ts
 if (import.meta.env.PROD && "serviceWorker" in navigator) registerServiceWorker();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

@@ -18,6 +18,7 @@ import { scopeOf } from "../offline/identity";
 import { deleteDraft, getDraft, getReport, isActiveState, nothingDelivered, putDraft, readPendingIds, submitReport, subscribe, validateReportForm } from "../offline/store";
 import { getSyncStatus } from "../offline/sync";
 import { useTask } from "../offline/useCourierData";
+import { holdUpdate } from "../offline/sw";
 import { ItemAnswer, ItemReportCard } from "../components/ItemReportCard";
 import { SignaturePad } from "../components/SignaturePad";
 import { SyncChip } from "../components/SyncChip";
@@ -63,6 +64,14 @@ export default function TaskDetailPage() {
   const [draftError, setDraftError] = useState("");
   const [hasDraft, setHasDraft] = useState(false);
   const [listOpen, setListOpen] = useState(false);
+
+  //a new build must not reload the page while a report form is open on it: the update waits until this screen is left
+  //or the task closes (the hold is released in the effect cleanup either way)
+  const formOpen = !!task && task.status === TaskStatus.pending;
+  useEffect(() => {
+    if (!formOpen) return;
+    return holdUpdate();
+  }, [formOpen]);
 
   //the autosave reads the form through this ref, never through a closure: a timer or a pagehide handler would
   //otherwise write whatever the form held when it was scheduled

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import dayjs from "dayjs";
@@ -9,14 +9,12 @@ import CloudDoneOutlinedIcon from "@mui/icons-material/CloudDoneOutlined";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
-import SystemUpdateAltIcon from "@mui/icons-material/SystemUpdateAlt";
 
 import { useAuth } from "../../utils/auth";
 import { isSecureContext, scopeOf } from "../offline/identity";
 import { refresh } from "../offline/store";
 import { stopSync } from "../offline/sync";
 import { useBoard, useOtherAccountsWork, useSyncStatus } from "../offline/useCourierData";
-import { applyUpdate, isUpdateReady, subscribeSw } from "../offline/sw";
 import { PendingReportsDialog } from "./PendingReportsDialog";
 
 //the slim strip under the courier header: network, the prepared dataset, the send queue. plain buttons, not mui ones:
@@ -30,12 +28,9 @@ export function SyncStatusBar() {
   //the board hook for ready + refreshed_at only, the tab and search do not matter here
   const { data: board } = useBoard(scope, "all", "");
   const { data: others } = useOtherAccountsWork(scope);
-  const [updateReady, setUpdateReady] = useState(isUpdateReady());
   const [refreshing, setRefreshing] = useState(false);
   const [refreshFailed, setRefreshFailed] = useState(false);
   const [listOpen, setListOpen] = useState(false);
-
-  useEffect(() => subscribeSw(setUpdateReady), []);
 
   async function refreshNow() {
     if (!scope || refreshing) return;
@@ -91,12 +86,6 @@ export function SyncStatusBar() {
         {status.attention > 0 && (
           <button type="button" className="sync-chip sync-chip--warn sync-chip--action" onClick={() => setListOpen(true)}>
             <ErrorOutlineIcon fontSize="inherit" /> {status.attention === 1 ? t("sync_attention_one") : t("sync_attention_count", { count: status.attention })}
-          </button>
-        )}
-
-        {updateReady && (
-          <button type="button" className="sync-chip sync-chip--action sync-chip--update" onClick={() => applyUpdate()}>
-            <SystemUpdateAltIcon fontSize="inherit" /> {t("update_available")}: {t("update_reload")}
           </button>
         )}
 

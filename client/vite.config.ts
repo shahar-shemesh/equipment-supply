@@ -23,8 +23,9 @@ export default defineConfig({
   plugins: [
     react(),
     //the offline shell: the built assets are precached, a navigation to any courier route offline serves index.html.
-    //prompt mode: a new build waits for the עדכון button, it never reloads on its own. /api is kept out of the html
-    //fallback on purpose, and no api response is ever cached by the worker (the data layer keeps the courier's data)
+    //prompt mode so that sw.ts decides when the new build is applied (at once, unless a report form is open), the
+    //plugin's autoUpdate would reload under a half drawn signature. /api is kept out of the html fallback on purpose,
+    //and no api response is ever cached by the worker (the data layer keeps the courier's data)
     VitePWA({
       registerType: "prompt",
       injectRegister: false,
