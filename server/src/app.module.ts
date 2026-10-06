@@ -7,6 +7,7 @@ import { IssuancesModule } from './issuances/issuances.module';
 import { CouriersModule } from './couriers/couriers.module';
 import { DeliveryModule } from './delivery/delivery.module';
 import { SeedModule } from './seed/seed.module';
+import { AuditModule } from './audit/audit.module';
 import { schemaSyncAllowed } from './env';
 
 @Module({
@@ -35,6 +36,7 @@ import { schemaSyncAllowed } from './env';
     CouriersModule,
     DeliveryModule,
     SeedModule,
+    AuditModule,
   ],
 })
 export class AppModule {}

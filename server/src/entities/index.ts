@@ -7,7 +7,8 @@ import { DeliveryAttempt } from './delivery-attempt.entity';
 import { DeliveryAttemptItem } from './delivery-attempt-item.entity';
 import { DeliveryOperation } from './delivery-operation.entity';
 import { DeliveryConflict } from './delivery-conflict.entity';
+import { AuditLog } from './audit-log.entity';
 
-export { User, Courier, Issuance, IssuanceItem, DeliveryTask, DeliveryAttempt, DeliveryAttemptItem, DeliveryOperation, DeliveryConflict };
+export { User, Courier, Issuance, IssuanceItem, DeliveryTask, DeliveryAttempt, DeliveryAttemptItem, DeliveryOperation, DeliveryConflict, AuditLog };
 
-export const entities = [User, Courier, Issuance, IssuanceItem, DeliveryTask, DeliveryAttempt, DeliveryAttemptItem, DeliveryOperation, DeliveryConflict];
+export const entities = [User, Courier, Issuance, IssuanceItem, DeliveryTask, DeliveryAttempt, DeliveryAttemptItem, DeliveryOperation, DeliveryConflict, AuditLog];

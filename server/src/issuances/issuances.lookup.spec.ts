@@ -8,7 +8,8 @@ describe('manager exact number lookup', () => {
     qb.getCount = jest.fn().mockResolvedValue(0);
     qb.getRawMany = jest.fn().mockResolvedValue([]);
     const repo: any = { createQueryBuilder: jest.fn().mockReturnValue(qb) };
-    return { qb, service: new IssuancesService(repo, null, null) };
+    //list() never writes, the audit service is a stub
+    return { qb, service: new IssuancesService(repo, null, null, { record: jest.fn() } as any) };
   }
 
   /*──────────────────────────────────────────────────────────────────────────*/

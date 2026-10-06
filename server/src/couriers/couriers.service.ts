@@ -2,9 +2,15 @@ import { BadRequestException, ConflictException, Injectable, Logger, NotFoundExc
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 
-import { TaskStatus } from '../../../shared/@core';
+import { AuditAction, AuditEntityType, TaskStatus } from '../../../shared/@core';
 import { Courier, DeliveryTask } from '../entities';
+import { AuditService } from '../audit/audit.service';
+import { changesBetween, snapshot } from '../audit/audit.diff';
 import { validateCourierPayload } from './courier.validation';
+
+//what the audit row of an update compares. employee_id, email and zones are not on the form today and stay in the list
+//so a later form change is recorded without touching this
+const UPDATE_FIELDS = ['name', 'employee_id', 'id_number', 'phone', 'email', 'zones'];
 
 //postgres unique violation on couriers.id_number: two managers saved the same person at the same moment and the
 //findOne before the save did not see the other row yet. turned into the same 409 as the normal path
@@ -19,6 +25,7 @@ export class CouriersService {
   constructor(
     @InjectRepository(Courier) private couriers: Repository<Courier>,
     @InjectRepository(DeliveryTask) private tasks: Repository<DeliveryTask>,
+    private audit: AuditService,
   ) {}
 
   // /api/couriers - every active courier with the number of open tasks (the management table, the "עומס שליחים" widget and the assign dialog)
@@ -43,12 +50,22 @@ export class CouriersService {
   //the old delivery tasks point at that row, so the history of the person stays in one place
   async create(body: any, user: any) {
     const data = validateCourierPayload(body);
-    const existing = await this.couriers.findOne({ where: { id_number: data.id_number } });
-    if (existing?.active) throw new ConflictException(`a courier with id number ${data.id_number} already exists (${existing.name})`);
 
-    const courier = existing ? Object.assign(existing, data, { active: true }) : this.couriers.create({ ...data, active: true });
+    //one transaction so the row and its audit line commit together. the steps are the ones the plain repository ran
+    //before: the lookup, the save, and the unique index as the backstop for two managers saving the same person at once
+    let courier: Courier;
+    let existing: Courier;
     try {
-      await this.couriers.save(courier);
+      await this.couriers.manager.transaction(async (em) => {
+        //the row is locked: two managers bringing the same deleted person back at once would both read it inactive and
+        //write two reactivate rows for one change. the second now waits, reads it active and gets the 409
+        existing = await em.findOne(Courier, { where: { id_number: data.id_number }, lock: { mode: 'pessimistic_write' } });
+        if (existing?.active) throw new ConflictException(`a courier with id number ${data.id_number} already exists (${existing.name})`);
+
+        courier = existing ? Object.assign(existing, data, { active: true }) : em.create(Courier, { ...data, active: true });
+        await em.save(courier);
+        await this.audit.record(em, { actor: user, action: existing ? AuditAction.courier_reactivate : AuditAction.courier_create, entity_type: AuditEntityType.courier, entity_id: courier.id, details: { name: courier.name, employee_id: courier.employee_id ?? null } });
+      });
     } catch (e) {
       if (isUniqueViolation(e)) throw new ConflictException(`a courier with id number ${data.id_number} already exists`);
       throw e;
@@ -62,15 +79,26 @@ export class CouriersService {
   // PATCH /api/couriers/:id - the whole form again, not a partial patch. employee_id / zones / email are not on the screen and stay as they are
   async update(id: number, body: any, user: any) {
     const data = validateCourierPayload(body);
-    const courier = await this.couriers.findOne({ where: { id, active: true } });
-    if (!courier) throw new NotFoundException(`courier ${id} not found`);
 
-    const other = await this.couriers.findOne({ where: { id_number: data.id_number } });
-    if (other && other.id !== id) throw new ConflictException(`a courier with id number ${data.id_number} already exists (${other.name})`);
-
-    Object.assign(courier, data);
+    let courier: Courier;
     try {
-      await this.couriers.save(courier);
+      await this.couriers.manager.transaction(async (em) => {
+        //locked, so the `from` of the audit row is the value this edit really replaced and two overlapping edits read
+        //back as a chain, not as two edits of the same original
+        courier = await em.findOne(Courier, { where: { id, active: true }, lock: { mode: 'pessimistic_write' } });
+        if (!courier) throw new NotFoundException(`courier ${id} not found`);
+
+        const other = await em.findOne(Courier, { where: { id_number: data.id_number } });
+        if (other && other.id !== id) throw new ConflictException(`a courier with id number ${data.id_number} already exists (${other.name})`);
+
+        const before = snapshot(courier, UPDATE_FIELDS);
+        Object.assign(courier, data);
+        await em.save(courier);
+
+        //the whole form comes back on every save; the row only says what differs, and nothing differs means no row
+        const changes = changesBetween(before, courier, UPDATE_FIELDS);
+        if (changes) await this.audit.record(em, { actor: user, action: AuditAction.courier_update, entity_type: AuditEntityType.courier, entity_id: id, details: { changes } });
+      });
     } catch (e) {
       if (isUniqueViolation(e)) throw new ConflictException(`a courier with id number ${data.id_number} already exists`);
       throw e;
@@ -112,6 +140,8 @@ export class CouriersService {
       }
 
       await em.update(Courier, { id: In(ids) }, { active: false });
+      const batchId = AuditService.batchId();
+      for (const r of rows) await this.audit.record(em, { actor: user, action: AuditAction.courier_remove, entity_type: AuditEntityType.courier, entity_id: r.id, batch_id: batchId, details: { name: r.name } });
       this.logger.warn(`couriers ${rows.map((r) => `${r.id} ${r.name}`).join(', ')} deleted by user ${user?.sub}`);
     });
 

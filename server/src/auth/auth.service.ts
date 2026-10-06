@@ -4,8 +4,9 @@ import { JwtService } from '@nestjs/jwt';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
 
-import { UserRole } from '../../../shared/@core';
+import { AuditAction, AuditActorType, AuditEntityType, UserRole } from '../../../shared/@core';
 import { User, Courier } from '../entities';
+import { AuditService } from '../audit/audit.service';
 import { DEV_PASSWORD, DEV_STRATEGY } from './auth.constants';
 import { devAuthAllowed, isLocal } from '../env';
 
@@ -17,6 +18,7 @@ export class AuthService {
     @InjectRepository(User) private users: Repository<User>,
     @InjectRepository(Courier) private couriers: Repository<Courier>,
     private jwt: JwtService,
+    private audit: AuditService,
   ) {}
 
   // /api/auth/login
@@ -36,7 +38,20 @@ export class AuthService {
 
     const user = await this.users.findOne({ where: { username: (username || '').trim() } });
     const ok = !!user && (await bcrypt.compare(password || '', user.password_hash));
-    if (!ok) throw new UnauthorizedException('bad credentials');
+    if (!ok) {
+      //the one rejected request the audit log keeps: a failed login is the event itself. the name is kept only when it
+      //is a real account (a wrong password on a known user is what an attack on that user looks like); a string that
+      //matches no account is often a password typed into the wrong field, so only the fact is kept. the password itself
+      //never gets near a row. best effort on purpose: the answer is about the credentials, a storage problem is logged
+      //and does not turn the 401 into a 500
+      const attempted = String(username ?? '').trim().slice(0, 100);
+      try {
+        await this.audit.recordDetached({ actor_type: AuditActorType.user, action: AuditAction.auth_login_failed, entity_type: AuditEntityType.user, entity_id: user?.id ?? null, details: { username: user ? attempted : null, known_user: !!user } });
+      } catch (e: any) {
+        this.logger.error(`failed login of ${JSON.stringify(attempted)} was not recorded: ${e?.message || e}`);
+      }
+      throw new UnauthorizedException('bad credentials');
+    }
 
     //courier accounts carry their courier row id so the delivery routes do not need a lookup on every call
     const courier = user.role === UserRole.courier ? await this.couriers.findOne({ where: { user_id: user.id } }) : null;
@@ -49,6 +64,8 @@ export class AuthService {
       courier_id: courier?.id ?? null,
     };
     // console.log('login payload', payload);
+    //detached: a login writes nothing else, there is no transaction to ride on
+    await this.audit.recordDetached({ actor: payload, action: AuditAction.auth_login, entity_type: AuditEntityType.user, entity_id: user.id });
     //the jwt calls the user id sub, IUser calls it id. both go back so the tablet never keys its local storage on undefined
     return { token: this.jwt.sign(payload), user: { id: user.id, ...payload } };
   }

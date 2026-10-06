@@ -21,6 +21,7 @@ All routes are under `/api` and need `Authorization: Bearer <token>` except logi
 | `GET /conflicts`, `GET /conflicts/:id` | manager | rejected reports (`?status=pending|reviewed|all&page=&page_size=`, no signatures in the list), one report with its signature next to the current state |
 | `POST /conflicts/:id/review` | manager | `{ note, version }`: mark reviewed; 409 `review_conflict` with the existing review when another manager got there first |
 | `GET /delivery/lookup?number=` | courier | find my task by the printed number |
+| `GET /audit` | manager | the audit log as `IAuditPage { items, total }`, newest first; `?issuance_id=&actor_user_id=&action=&from=&to=&page=&size=` (`page` 1-based, `size` default 50 and at most 100, `from` / `to` an ISO date or date time read as UTC, `to` exclusive and a bare date covering its whole day); a value that is not what the parameter means is a 400, never an empty page |
 
 ## API contract changes
 
@@ -32,5 +33,9 @@ Made for the offline work, in `shared/@core.ts`:
 - Every 409 of that route is `{ statusCode: 409, message, code }` with `code` from `ReportConflictCode` (`task_closed`, `task_cancelled`, `issuance_not_assigned`, `revision_changed`, `operation_reused`). The default Nest `error` field is gone from these bodies; `message` and `statusCode` stay. The legacy request without an operation id still answers 409 with the message `task already closed`, now with `code: task_closed`.
 - `POST /auth/login` returns `user: { id, sub, username, display_name, role, courier_id }` and `GET /auth/me` returns `{ id, ...jwt payload }`: `id` is `users.id`, the same value as `sub`, so the client never keys its local storage on an undefined id. The client also fills `id` from `sub` for a session stored before this change.
 - `IIssuance.revision`, `IDeliveryAttempt.client_reported_at` and the client only `IDeliveryTask.local_report` were added to the shared types.
+
+Made for the audit log, in `shared/@core.ts`:
+
+- `GET /audit` is new, manager only, see the audit paragraph under [Rules enforced on the server](domain.md#rules-enforced-on-the-server) for what is recorded. The shared types are `AuditActorType`, `AuditAction` (the closed action list), `AuditEntityType`, `IAuditEntry` and `IAuditPage`. No other route changed its body or its status codes; `POST /issuances/mark-urgent` still answers `{ updated }` with the count of editable rows.
 
 Nothing else in the API changed.

@@ -2,8 +2,10 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository } from 'typeorm';
 
-import { IssuanceSortKey, IssuanceStatus, Priority, TaskStatus } from '../../../shared/@core';
+import { AuditAction, AuditEntityType, IssuanceSortKey, IssuanceStatus, Priority, TaskStatus } from '../../../shared/@core';
 import { Issuance, DeliveryTask, Courier } from '../entities';
+import { AuditService } from '../audit/audit.service';
+import { changesBetween, snapshot } from '../audit/audit.diff';
 import { assertCanDo, editableStatuses } from './issuance.rules';
 
 //the courier on the open task, or on the last closed one, the same pick as withCurrentTask below. a correlated subselect
@@ -51,6 +53,9 @@ function isIsoDate(s: any) {
   return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(Date.parse(s));
 }
 
+//what PATCH may change, and what the audit row of an edit compares before and after
+const EDIT_FIELDS = ['priority', 'delivery_date', 'notes'];
+
 /*──────────────────────────────────────────────────────────────────────────*/
 
 @Injectable()
@@ -61,6 +66,7 @@ export class IssuancesService {
     @InjectRepository(Issuance) private issuances: Repository<Issuance>,
     @InjectRepository(DeliveryTask) private tasks: Repository<DeliveryTask>,
     @InjectRepository(Courier) private couriers: Repository<Courier>,
+    private audit: AuditService,
   ) {}
 
   // /api/issuances?status=&priority=&city=&customer=&courier_id=&date=&search=&sort=&order=&page=&page_size=
@@ -151,6 +157,8 @@ export class IssuancesService {
       const issuance = await lockIssuance(em, id);
       if (!issuance) throw new NotFoundException(`issuance ${id} not found`);
       assertCanDo(wantsSelfPickup ? 'self_pickup' : 'edit', issuance);
+      const before = snapshot(issuance, EDIT_FIELDS);
+      const fromStatus = issuance.status;
 
       if (priority) issuance.priority = priority;
       if (hasDate) issuance.delivery_date = date;
@@ -167,6 +175,15 @@ export class IssuancesService {
       }
 
       await em.save(issuance);
+
+      //the audit row says what changed, not what was sent: a PATCH that repeats the stored values is a 200 and no row.
+      //self pickup is always a change (the status moved) and carries the field edits that came along with it
+      const changes = changesBetween(before, issuance, EDIT_FIELDS);
+      if (wantsSelfPickup) {
+        await this.audit.record(em, { actor: user, action: AuditAction.issuance_self_pickup, entity_type: AuditEntityType.issuance, entity_id: id, issuance_id: id, details: { from_status: fromStatus, ...(changes ? { changes } : {}) } });
+      } else if (changes) {
+        await this.audit.record(em, { actor: user, action: AuditAction.issuance_edit, entity_type: AuditEntityType.issuance, entity_id: id, issuance_id: id, details: { changes } });
+      }
     });
 
     return this.findOne(id);
@@ -175,18 +192,39 @@ export class IssuancesService {
   /*──────────────────────────────────────────────────────────────────────────*/
 
   // POST /api/issuances/mark-urgent { ids }
-  //closed rows are skipped, not an error: the bar action is a bulk shortcut and the count tells the manager what happened
-  async setPriority(ids: number[], priority: Priority) {
+  //closed rows are skipped, not an error: the bar action is a bulk shortcut and the count tells the manager what happened.
+  //the open rows are locked in id order like assign does, then updated in one statement as before. the count stays the
+  //number of editable rows (the board relies on it); the audit rows are only for the ones whose priority really moved
+  async setPriority(ids: number[], priority: Priority, user: any) {
     if (!ids.length) return { updated: 0 };
     if (!Object.values(Priority).includes(priority)) throw new BadRequestException(`unknown priority ${priority}`);
 
-    const res = await this.issuances
-      .createQueryBuilder()
-      .update()
-      .set({ priority })
-      .where('id IN (:...ids) AND status IN (:...open)', { ids, open: editableStatuses })
-      .execute();
-    return { updated: res.affected || 0 };
+    const sorted = [...new Set(ids)].sort((a, b) => a - b);
+    const batchId = AuditService.batchId();
+
+    return this.issuances.manager.transaction(async (em) => {
+      const open = await em
+        .getRepository(Issuance)
+        .createQueryBuilder('i')
+        .select(['i.id', 'i.priority'])
+        .setLock('pessimistic_write')
+        .where('i.id IN (:...ids) AND i.status IN (:...open)', { ids: sorted, open: editableStatuses })
+        .orderBy('i.id', 'ASC')
+        .getMany();
+
+      const res = await em
+        .getRepository(Issuance)
+        .createQueryBuilder()
+        .update()
+        .set({ priority })
+        .where('id IN (:...ids) AND status IN (:...open)', { ids: sorted, open: editableStatuses })
+        .execute();
+
+      for (const row of open.filter((r) => r.priority !== priority)) {
+        await this.audit.record(em, { actor: user, action: AuditAction.issuance_mark_urgent, entity_type: AuditEntityType.issuance, entity_id: row.id, issuance_id: row.id, batch_id: batchId, details: { from_priority: row.priority } });
+      }
+      return { updated: res.affected || 0 };
+    });
   }
 
   /*──────────────────────────────────────────────────────────────────────────*/
@@ -200,6 +238,7 @@ export class IssuancesService {
     if (scheduledDate && !isIsoDate(scheduledDate)) throw new BadRequestException('scheduled_date must be yyyy-mm-dd');
 
     const sorted = [...new Set(ids)].sort((a, b) => a - b);
+    const batchId = AuditService.batchId();
     let courier: Courier;
 
     await this.issuances.manager.transaction(async (em) => {
@@ -213,15 +252,17 @@ export class IssuancesService {
         const issuance = await lockIssuance(em, id);
         if (!issuance) throw new NotFoundException(`issuance ${id} not found`);
         assertCanDo('assign', issuance);
+        const fromStatus = issuance.status;
 
         await cancelOpenTasks(em, id);
-        await em.save(em.create(DeliveryTask, { issuance_id: id, courier_id: courierId, scheduled_date: scheduledDate || issuance.delivery_date || null, assigned_by: user?.sub ?? null }));
+        const task = await em.save(em.create(DeliveryTask, { issuance_id: id, courier_id: courierId, scheduled_date: scheduledDate || issuance.delivery_date || null, assigned_by: user?.sub ?? null }));
 
         issuance.status = IssuanceStatus.assigned;
         issuance.self_pickup = false;
         issuance.revision += 1; //a report written against the old task is stale now, whoever the new courier is
         if (scheduledDate) issuance.delivery_date = scheduledDate;
         await em.save(issuance);
+        await this.audit.record(em, { actor: user, action: AuditAction.issuance_assign, entity_type: AuditEntityType.issuance, entity_id: id, issuance_id: id, batch_id: batchId, details: { courier_id: courierId, task_id: task.id, scheduled_date: task.scheduled_date, from_status: fromStatus } });
       }
     });
 
@@ -240,6 +281,7 @@ export class IssuancesService {
       const issuance = await lockIssuance(em, id);
       if (!issuance) throw new NotFoundException(`issuance ${id} not found`);
       assertCanDo('delete', issuance);
+      const fromStatus = issuance.status;
 
       issuance.status = IssuanceStatus.deleted;
       issuance.deleted_at = new Date();
@@ -247,6 +289,7 @@ export class IssuancesService {
       issuance.revision += 1;
       await cancelOpenTasks(em, id);
       await em.save(issuance);
+      await this.audit.record(em, { actor: user, action: AuditAction.issuance_delete, entity_type: AuditEntityType.issuance, entity_id: id, issuance_id: id, details: { reason: issuance.delete_reason, from_status: fromStatus } });
 
       this.logger.warn(`issuance ${issuance.sap_number} deleted by user ${user?.sub}, reason: ${issuance.delete_reason || '-'}`);
     });

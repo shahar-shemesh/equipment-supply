@@ -2,8 +2,9 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 
-import { ConflictReviewStatus, IAttemptResult, IConflictObserved, IConflictReceipt, IConflictStatus, IDeliveryConflict, IssuanceStatus, ReportConflictCode, TaskStatus } from '../../../shared/@core';
+import { AuditAction, AuditEntityType, ConflictReviewStatus, IAttemptResult, IConflictObserved, IConflictReceipt, IConflictStatus, IDeliveryConflict, IssuanceStatus, ReportConflictCode, TaskStatus } from '../../../shared/@core';
 import { DeliveryAttempt, DeliveryConflict, DeliveryOperation, DeliveryTask, Issuance, User } from '../entities';
+import { AuditService } from '../audit/audit.service';
 import { lockIssuance } from '../issuances/issuances.service';
 import { handedOver, validateRecipient, validateSignature } from './attempt.validation';
 import { isConflictUniqueViolation, parseClientTime, payloadHash, validateEvidenceItems, validateIssuanceRevision, validateOperationId } from './operation';
@@ -50,6 +51,7 @@ export class ConflictsService {
     @InjectRepository(DeliveryTask) private tasks: Repository<DeliveryTask>,
     @InjectRepository(DeliveryOperation) private operations: Repository<DeliveryOperation>,
     @InjectRepository(User) private users: Repository<User>,
+    private audit: AuditService,
   ) {}
 
   // POST /api/delivery/tasks/:id/conflicts  (IAttemptPayload with operation_id)
@@ -122,6 +124,8 @@ export class ConflictsService {
           client_reported_at: clientReportedAt,
         });
         await em.save(row);
+        //the 409 of the attempts route left no row (a rejected request); the evidence being kept is the event
+        await this.audit.record(em, { actor: user, action: AuditAction.delivery_conflict_record, entity_type: AuditEntityType.delivery_conflict, entity_id: row.id, issuance_id: task.issuance_id, details: { task_id: task.id, operation_id: operationId, rejection_code: code, submitted_revision: submittedRevision } });
         return this.receipt(row, false);
       });
     } catch (e) {
@@ -251,6 +255,8 @@ export class ConflictsService {
       if (row.review_version !== version) throw conflict('the report changed since the screen loaded it', 'review_conflict', { review: await this.reviewOf(row) });
 
       await em.update(DeliveryConflict, { id }, { review_status: ConflictReviewStatus.reviewed, reviewed_by: user.sub, reviewed_at: new Date(), review_note: note, review_version: row.review_version + 1 });
+      //only the write gets a row: the same manager repeating the same note returned above without changing anything
+      await this.audit.record(em, { actor: user, action: AuditAction.delivery_conflict_review, entity_type: AuditEntityType.delivery_conflict, entity_id: id, issuance_id: row.issuance_id, details: { review_version: row.review_version + 1 } });
       return em.getRepository(DeliveryConflict).findOne({ where: { id } });
     });
 

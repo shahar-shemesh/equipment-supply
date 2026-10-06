@@ -3,8 +3,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
 
-import { AttemptOutcome, IssuanceStatus, NonDeliveryReason, RecipientType, TaskStatus } from '../../../shared/@core';
+import { AttemptOutcome, AuditAction, AuditEntityType, IssuanceStatus, NonDeliveryReason, RecipientType, TaskStatus } from '../../../shared/@core';
 import { User, Courier, Issuance, DeliveryTask, DeliveryAttempt } from '../entities';
+import { AuditService } from '../audit/audit.service';
 import { DEV_PASSWORD } from '../auth/auth.constants';
 import { destructiveSeedAllowed } from '../env';
 import { buildIssuances, couriers, users, SAMPLE_SIGNATURE } from './seed.data';
@@ -20,6 +21,7 @@ export class SeedService {
     @InjectRepository(Issuance) private issuanceRepo: Repository<Issuance>,
     @InjectRepository(DeliveryTask) private taskRepo: Repository<DeliveryTask>,
     @InjectRepository(DeliveryAttempt) private attemptRepo: Repository<DeliveryAttempt>,
+    private audit: AuditService,
   ) {}
 
   //wipes everything and inserts the sample set. npm run seed.
@@ -27,7 +29,7 @@ export class SeedService {
   async run() {
     if (!destructiveSeedAllowed()) throw new Error('refusing to seed: needs ENVIRONMENT=LOCAL and ALLOW_DESTRUCTIVE_SEED=true');
     this.logger.log('===== seeding, all existing rows are dropped =====');
-    await this.dataSource.query('TRUNCATE TABLE delivery_conflicts, delivery_operations, delivery_attempt_items, delivery_attempts, delivery_tasks, issuance_items, issuances, couriers, users RESTART IDENTITY CASCADE');
+    await this.dataSource.query('TRUNCATE TABLE audit_log, delivery_conflicts, delivery_operations, delivery_attempt_items, delivery_attempts, delivery_tasks, issuance_items, issuances, couriers, users RESTART IDENTITY CASCADE');
 
     const hash = await bcrypt.hash(DEV_PASSWORD, 8); //cheap rounds, dev accounts
 
@@ -44,12 +46,14 @@ export class SeedService {
       }
     }
 
+    let issuances = 0;
     let tasks = 0;
     let attempts = 0;
     for (const row of buildIssuances()) {
       const { courier, ...data } = row;
       //the cast keeps typeorm on the single entity overload, with a plain any it picks the array one
       const issuance = await this.issuanceRepo.save(this.issuanceRepo.create(data as Partial<Issuance>));
+      issuances++;
 
       if (!courier) continue;
       const done = issuance.status !== IssuanceStatus.assigned;
@@ -91,7 +95,10 @@ export class SeedService {
       attempts++;
     }
 
-    this.logger.log(`seeded ${users.length} users, ${couriers.length} couriers, 30 issuances, ${tasks} tasks, ${attempts} attempts 🍺`);
+    //the first system actor: the truncate above wiped the log, this row signs the state everything after it builds on
+    await this.audit.recordDetached({ action: AuditAction.system_seed, entity_type: AuditEntityType.system, details: { users: users.length, couriers: couriers.length, issuances } });
+
+    this.logger.log(`seeded ${users.length} users, ${couriers.length} couriers, ${issuances} issuances, ${tasks} tasks, ${attempts} attempts 🍺`);
     this.logger.log(`dev accounts: ${users.map((u) => u.username).join(', ')} / password ${DEV_PASSWORD}`);
   }
 }

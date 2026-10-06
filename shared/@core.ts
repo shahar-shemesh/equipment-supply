@@ -303,3 +303,63 @@ export interface ISortState {
   key: IssuanceSortKey;
   dir: "asc" | "desc";
 }
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+// the audit log (audit_log): one row per committed state change, written inside the transaction of the change itself and
+// readable by a manager through GET /api/audit. a closed list on purpose: a new action is named here first and then
+// recorded explicitly in the service that performs it, nothing is logged by an interceptor
+export enum AuditActorType {
+  user = "user",
+  system = "system", //the seed today, the SAP interface when it exists
+}
+
+export enum AuditEntityType {
+  issuance = "issuance",
+  courier = "courier",
+  delivery_task = "delivery_task",
+  delivery_conflict = "delivery_conflict",
+  user = "user",
+  system = "system",
+}
+
+export enum AuditAction {
+  issuance_assign = "issuance.assign",
+  issuance_edit = "issuance.edit",
+  issuance_self_pickup = "issuance.self_pickup",
+  issuance_mark_urgent = "issuance.mark_urgent",
+  issuance_delete = "issuance.delete",
+  courier_create = "courier.create",
+  courier_reactivate = "courier.reactivate", //a deleted courier added again under the same id number
+  courier_update = "courier.update",
+  courier_remove = "courier.remove",
+  delivery_report = "delivery.report",
+  delivery_conflict_record = "delivery.conflict_record",
+  delivery_conflict_review = "delivery.conflict_review",
+  auth_login = "auth.login",
+  auth_login_failed = "auth.login_failed", //the one rejected request that is recorded
+  system_seed = "system.seed",
+}
+
+// one row of audit_log. the actor is copied at write time (no foreign key to users), so the row reads the same after a
+// rename or a delete. details holds ids and short scalars only: never a signature, a password hash or a whole payload
+export interface IAuditEntry {
+  id: number;
+  at: string;
+  actor_type: AuditActorType;
+  actor_user_id: number | null;
+  actor_username: string | null;
+  actor_role: UserRole | null;
+  action: AuditAction;
+  entity_type: AuditEntityType;
+  entity_id: number | null;
+  issuance_id: number | null; //set on every row that concerns an issuance, the delivery and conflict rows included
+  batch_id: string | null; //shared by the rows of one bulk action (assign, mark urgent, remove couriers)
+  details: Record<string, any> | null;
+}
+
+// GET /api/audit?issuance_id=&actor_user_id=&action=&from=&to=&page=&size=  -  newest first
+export interface IAuditPage {
+  items: IAuditEntry[];
+  total: number;
+}

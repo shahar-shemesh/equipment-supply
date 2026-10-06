@@ -38,8 +38,8 @@ export class IssuancesController {
   }
 
   @Post('mark-urgent')
-  markUrgent(@Body() body: any) {
-    return this.svc.setPriority((body?.ids || []).map(Number), Priority.urgent);
+  markUrgent(@Body() body: any, @CurrentUser() user: any) {
+    return this.svc.setPriority((body?.ids || []).map(Number), Priority.urgent, user);
   }
 
   @Delete(':id')
