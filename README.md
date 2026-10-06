@@ -35,7 +35,7 @@ What does not exist: the SAP interface, history and analytics screens, PDF / SMS
 | Part | Technology |
 | --- | --- |
 | `client/` | React 18, TypeScript, Vite, MUI 5 with an RTL emotion cache, SCSS, react-router 6, react-i18next, `idb` for IndexedDB, `vite-plugin-pwa` (workbox) for the service worker, vitest + jsdom + fake-indexeddb for the tests |
-| `server/` | NestJS 10, TypeORM 0.3 (hand written migrations), PostgreSQL 16, JWT (`@nestjs/jwt`), Jest + supertest |
+| `server/` | NestJS 10, TypeORM 0.3 (hand written migrations), PostgreSQL 16, JWT (`@nestjs/jwt`), `helmet` for the security response headers, Jest + supertest |
 | `shared/` | Enums and interfaces (`@core.ts`), helpers (`@utils.ts`), the Hebrew dictionary (`i18n/he.ts`). Imported by both sides |
 | root | `docker-compose.yml` for PostgreSQL |
 
