@@ -168,6 +168,14 @@ a {
     display: flex;
     justify-content: center;
     padding: 60px;
+
+    // a lazy page that failed to load (AppRouter ChunkBoundary): one line and a reload button under it
+    &--failed {
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        color: var(--color-text-secondary);
+    }
 }
 
 // fingers: every real button, field and text link is at least 44px tall. !important because mui's emotion styles

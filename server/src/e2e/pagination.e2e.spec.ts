@@ -220,6 +220,33 @@ describe('filters', () => {
         for (const r of rows) expect([r.address_city, r.priority]).toEqual([city, Priority.urgent]);
     });
 
+    //the board's status quick actions and city multi select send a comma list, read as IN. one value or a blank
+    //item behaves exactly like the single value form above
+    it('status=assigned,delivered, the list form', async () => {
+        const statuses = [IssuanceStatus.assigned, IssuanceStatus.delivered];
+        const { rows, total } = await walk(`status=${statuses.join(',')}`);
+        expect(total).toBe(await count('i.status IN ($1, $2)', statuses));
+        expect(total).toBe((await count('i.status = $1', [statuses[0]])) + (await count('i.status = $1', [statuses[1]])));
+        for (const r of rows) expect(statuses).toContain(r.status);
+        expect((await list(`status=${IssuanceStatus.assigned},`)).total).toBe(await count('i.status = $1', [IssuanceStatus.assigned]));
+    });
+
+    it('city=<a>,<b>, the list form', async () => {
+        const [a, b] = (await ds.query('SELECT address_city AS city FROM issuances WHERE deleted_at IS NULL GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 2')).map((r) => r.city);
+        const { rows, total } = await walk(`city=${encodeURIComponent(`${a},${b}`)}`);
+        expect(total).toBe(await count('i.address_city IN ($1, $2)', [a, b]));
+        expect(total).toBeGreaterThan(await count('i.address_city = $1', [a]));
+        for (const r of rows) expect([a, b]).toContain(r.address_city);
+    });
+
+    //the board keeps priority a single select, the contract still takes the list; both values are every live row
+    it('priority=urgent,normal, the list form', async () => {
+        const both = Object.values(Priority);
+        const total = (await list(`priority=${both.join(',')}`)).total;
+        expect(total).toBe(await count('i.priority IN ($1, $2)', both));
+        expect(total).toBe(await count());
+    });
+
     it('customer, a partial name', async () => {
         const part = 'כהן';
         const { rows, total } = await walk(`customer=${encodeURIComponent(part)}`);

@@ -53,6 +53,14 @@ function isIsoDate(s: any) {
   return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(Date.parse(s));
 }
 
+//the board's status quick actions and city multi select send one comma list (status=assigned,delivered); one value is
+//a list of one, so the old single value form still works, compared verbatim as before (no trim: a city stored with
+//outer spaces is offered as is by the summary and must still match). blank items are dropped, nothing left means no filter
+function listOf(v: any) {
+  const list = v == null ? [] : String(v).split(',').filter(Boolean);
+  return list.length ? list : null;
+}
+
 //what PATCH may change, and what the audit row of an edit compares before and after
 const EDIT_FIELDS = ['priority', 'delivery_date', 'notes'];
 
@@ -88,14 +96,17 @@ export class IssuancesService {
       .addSelect(PRIORITY_RANK_SQL, 'priority_rank')
       .where('i.deleted_at IS NULL');
 
-    if (q.status) qb.andWhere('i.status = :status', { status: q.status });
+    const status = listOf(q.status);
+    if (status) qb.andWhere('i.status IN (:...status)', { status });
     //QR lookup must not match a partial number, address or customer name.
     if (q.number != null) {
       if (typeof q.number !== 'string' || !/^\d+$/.test(q.number)) throw new BadRequestException('number must contain digits only');
       qb.andWhere('i.sap_number = :number', { number: q.number });
     }
-    if (q.priority) qb.andWhere('i.priority = :priority', { priority: q.priority });
-    if (q.city) qb.andWhere('i.address_city = :city', { city: q.city });
+    const priority = listOf(q.priority);
+    if (priority) qb.andWhere('i.priority IN (:...priority)', { priority });
+    const city = listOf(q.city);
+    if (city) qb.andWhere('i.address_city IN (:...city)', { city });
     if (q.customer) qb.andWhere('i.customer_name ILIKE :customer', { customer: `%${q.customer}%` });
     if (q.date) qb.andWhere('i.delivery_date = :date', { date: q.date });
     if (q.courier_id) {

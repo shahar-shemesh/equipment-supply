@@ -6,20 +6,18 @@ import QrCodeScannerIcon from "@mui/icons-material/QrCodeScanner";
 import { IIssuance, ISortState } from "../../../../shared/@core";
 import { get, patch, post, errorMessage } from "../../utils/service";
 import { formatDateTime } from "../../utils/format";
-import { BoardFilters, emptyFilters } from "../components/BoardFilters";
-import { IssuancesTable, RowAction } from "../components/IssuancesTable";
+import { BoardFilters, initialFilters, toQuery } from "../components/BoardFilters";
+import { IssuancesTable, PAGE_SIZE, RowAction } from "../components/IssuancesTable";
 import { SideWidgets } from "../components/SideWidgets";
 import { AssignCourierDialog } from "../components/AssignCourierDialog";
 import { IssuanceDetailDialog } from "../components/IssuanceDetailDialog";
 import { FindNumberDialog } from "../../components/FindNumberDialog";
 
-const PAGE_SIZE = 15; //the design shows 15 rows a page
-
 //לוח ניהול הנפקות - the manager home. table + filters + the two side widgets + a bottom bar for bulk actions
 export default function IssuancesBoard() {
   const { t } = useTranslation();
 
-  const [filters, setFilters] = useState<any>(emptyFilters);
+  const [filters, setFilters] = useState<any>(initialFilters); //today's date on first open, the lists empty
   const [sort, setSort] = useState<ISortState>(null); //null = the server's default order, urgent first then by date
   const [page, setPage] = useState(1);
   const [data, setData] = useState<{ rows: IIssuance[]; total: number }>({ rows: [], total: 0 });
@@ -36,13 +34,17 @@ export default function IssuancesBoard() {
   async function load() {
     setLoading(true);
     try {
-      const params = { ...filters, sort: sort?.key, order: sort?.dir, page, page_size: PAGE_SIZE };
+      const params = { ...toQuery(filters), sort: sort?.key, order: sort?.dir, page, page_size: PAGE_SIZE };
       const [res, c, s] = await Promise.all([get("/issuances", params), get("/couriers"), get("/issuances/summary")]);
       // console.log("board data", res);
       setData(res);
       setCouriers(c);
       setSummary(s);
       setUpdatedAt(new Date());
+      //a page that outlived its rows (the last row of the last page deleted or moved to self pickup): back to the last
+      //page that has any. the grid does this on its own on desktop, the cards need it here
+      const lastPage = Math.max(Math.ceil(res.total / PAGE_SIZE), 1);
+      if (page > lastPage) setPage(lastPage);
       //rows that left the page (filter change, status change) leave the selection too
       setSelected((ids) => ids.filter((id) => res.rows.some((r) => r.id === id)));
     } catch (e) {
@@ -107,10 +109,6 @@ export default function IssuancesBoard() {
     }
   }
 
-  const from = data.total ? (page - 1) * PAGE_SIZE + 1 : 0;
-  const to = Math.min(page * PAGE_SIZE, data.total);
-  const lastPage = Math.max(Math.ceil(data.total / PAGE_SIZE), 1);
-
   return (
     <div className="board">
       <div className="board__main">
@@ -126,17 +124,15 @@ export default function IssuancesBoard() {
 
         <BoardFilters filters={filters} cities={summary.cities} onChange={changeFilters} />
 
-        <div className="board__range">
-          <span>{t("board_range", { from, to, total: data.total })}</span>
-          <button type="button" className="board__page-btn" disabled={page <= 1} onClick={() => setPage(page - 1)}>{"›"}</button>
-          <button type="button" className="board__page-btn" disabled={page >= lastPage} onClick={() => setPage(page + 1)}>{"‹"}</button>
-        </div>
-
+        {/* the range and the page arrows live in the table now: the grid footer on desktop, a bar above the cards on a phone */}
         <IssuancesTable
           rows={data.rows}
+          total={data.total}
+          page={page}
           loading={loading}
           selected={selected}
           onSelect={setSelected}
+          onPage={setPage}
           sort={sort}
           onSort={changeSort}
           onOpen={(row) => setDetailId(row.id)}

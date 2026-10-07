@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Checkbox, IconButton, ListItemIcon, Menu, MenuItem, TextField } from "@mui/material";
+import { DataGridPremium, GridColDef, GridLocaleText, GridPaginationModel, GridRowParams, GridRowSelectionModel, GridSortModel } from "@mui/x-data-grid-premium";
+import { heIL } from "@mui/x-data-grid-premium/locales";
 import MoreVertIcon from "@mui/icons-material/MoreVert";
 import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import PersonIcon from "@mui/icons-material/Person";
@@ -17,13 +19,18 @@ import { displayNumber, fullAddress } from "../../utils/format";
 import { useBreakpoint } from "../../utils/useBreakpoint";
 import { IssuanceCard } from "./IssuanceCard";
 
+export const PAGE_SIZE = 15; //the design shows 15 rows a page
+
 export type RowAction = "change_date" | "self_pickup" | "mark_urgent" | "change_courier" | "delete";
 
 type Props = {
   rows: IIssuance[];
+  total: number;
+  page: number;
   loading: boolean;
   selected: number[];
   onSelect: (ids: number[]) => void;
+  onPage: (page: number) => void;
   sort: ISortState; //null = the server default
   onSort: (next: ISortState) => void;
   onOpen: (row: IIssuance) => void;
@@ -41,11 +48,39 @@ const columnKeys: Record<IssuanceSortKey, string> = {
   status: "col_status",
 };
 
-//plain table on purpose, the design is a simple grid and a data-grid lib would fight the rtl styling.
-//under 900px (phone and portrait tablet, where nine columns cannot fit) the same rows render as cards (IssuanceCard),
-//the selection and the kebab menu are shared. sorting happens on the server (the pages are 15 of 30), here it is only
-//the arrows in the header and a select on the cards
-export function IssuancesTable({ rows, loading, selected, onSelect, sort, onSort, onOpen, onAction }: Props) {
+//closed issuances cannot be selected for assignment
+function canSelect(row: IIssuance) {
+  return row.status === IssuanceStatus.unassigned || row.status === IssuanceStatus.assigned || row.status === IssuanceStatus.not_delivered || row.status === IssuanceStatus.partially_delivered;
+}
+
+function rowSelectable(p: GridRowParams<IIssuance>) {
+  return canSelect(p.row);
+}
+
+//the grid's own idle glyph previews the next direction (an up arrow), the design has the faint up/down pair on every
+//idle column. sortingOrder is the slot's prop, an svg has no use for it
+function UnsortedIcon({ sortingOrder, ...rest }: any) {
+  return <UnfoldMoreIcon {...rest} />;
+}
+
+//the v8 model is { type, ids }. the header checkbox only produces "exclude" when isRowSelectable is not set, so it
+//never happens here; still both shapes become the concrete ids of this page's selectable rows before the bulk actions see them
+export function selectionToIds(model: GridRowSelectionModel, selectable: number[]) {
+  return selectable.filter((id) => (model.type === "include" ? model.ids.has(id) : !model.ids.has(id)));
+}
+
+//one entry or none. the grid walks asc -> desc -> default on its own (its default sortingOrder), like the old header did
+export function sortModelToState(model: GridSortModel): ISortState {
+  return model.length ? { key: model[0].field as IssuanceSortKey, dir: model[0].sort === "desc" ? "desc" : "asc" } : null;
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//mui data grid premium in server mode on desktop: it never holds more than the page the api returned, a page or a header
+//click goes up to IssuancesBoard, which owns page / sort / selected and runs the request. under 900px (phone and portrait
+//tablet, where nine columns cannot fit) the same rows render as cards (IssuanceCard) with a select all, a sort select
+//and the range arrows above them; the kebab menu is shared
+export function IssuancesTable({ rows, total, page, loading, selected, onSelect, onPage, sort, onSort, onOpen, onAction }: Props) {
   const { t } = useTranslation();
   const { compact } = useBreakpoint();
   const [menu, setMenu] = useState<{ anchor: HTMLElement; row: IIssuance }>(null);
@@ -55,8 +90,7 @@ export function IssuancesTable({ rows, loading, selected, onSelect, sort, onSort
     setMenu(null);
   }, [compact]);
 
-  //closed issuances cannot be selected for assignment
-  const selectable = rows.filter((r) => r.status === IssuanceStatus.unassigned || r.status === IssuanceStatus.assigned || r.status === IssuanceStatus.not_delivered || r.status === IssuanceStatus.partially_delivered);
+  const selectable = rows.filter(canSelect);
   const allChecked = selectable.length > 0 && selectable.every((r) => selected.includes(r.id));
 
   function toggle(id: number) {
@@ -73,33 +107,51 @@ export function IssuancesTable({ rows, loading, selected, onSelect, sort, onSort
     onAction(action, row);
   }
 
-  //a header click walks asc -> desc -> back to the default order
-  function cycleSort(key: IssuanceSortKey) {
-    if (sort?.key !== key) onSort({ key, dir: "asc" });
-    else if (sort.dir === "asc") onSort({ key, dir: "desc" });
-    else onSort(null);
-  }
-
   function flipDir() {
     onSort({ key: sort.key, dir: sort.dir === "asc" ? "desc" : "asc" });
   }
 
-  //the faint up/down glyph of the design on every column, a solid arrow on the sorted one
-  function sortableHeader(key: IssuanceSortKey) {
-    const active = sort?.key === key;
-    return (
-      <th className={`sortable ${active ? "is-sorted" : ""}`} onClick={() => cycleSort(key)} aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
-        <span>
-          {t(columnKeys[key])}
-          {!active && <UnfoldMoreIcon fontSize="inherit" className="sort-hint" />}
-          {active && sort.dir === "asc" && <ArrowUpwardIcon fontSize="inherit" />}
-          {active && sort.dir === "desc" && <ArrowDownwardIcon fontSize="inherit" />}
-        </span>
-      </th>
-    );
+  function changeSelection(model: GridRowSelectionModel) {
+    onSelect(selectionToIds(model, selectable.map((r) => r.id)));
   }
 
-  //one menu for the table rows and the cards, anchored to whichever kebab was tapped
+  function changeSort(model: GridSortModel) {
+    onSort(sortModelToState(model));
+  }
+
+  //the three models keep their reference between renders on purpose. the grid compares them by reference: a fresh [] for
+  //"no sort" on every render reads as a sort change, and the grid answers a sort change by jumping back to page 1
+  //(so page 2 bounced straight back). the columns too: a new array makes the grid re-register them and drop a width
+  //the manager dragged, so onOpen is read through a ref instead of sitting in the memo deps
+  const selectionModel = useMemo<GridRowSelectionModel>(() => ({ type: "include", ids: new Set(selected) }), [selected]);
+  const sortModel = useMemo<GridSortModel>(() => (sort ? [{ field: sort.key, sort: sort.dir }] : []), [sort]);
+  const paginationModel = useMemo<GridPaginationModel>(() => ({ page: page - 1, pageSize: PAGE_SIZE }), [page]);
+
+  const onOpenRef = useRef(onOpen);
+  onOpenRef.current = onOpen;
+
+  //the fixed widths add up to 962 with the checkbox column, what a 1024 landscape tablet leaves the grid after the
+  //gutters. the two flex columns take whatever a wider screen adds
+  const columns = useMemo<GridColDef<IIssuance>[]>(() => [
+    { field: "number", headerName: t(columnKeys.number), width: 120, renderCell: (p) => <button type="button" className="link-button issuances-grid__number" onClick={() => onOpenRef.current(p.row)}>{displayNumber(p.row)}</button> },
+    { field: "customer", headerName: t(columnKeys.customer), flex: 1, minWidth: 120, cellClassName: "col-wrap", valueGetter: (_, row) => row.customer_name },
+    { field: "destination", headerName: t(columnKeys.destination), flex: 1.2, minWidth: 140, cellClassName: "col-wrap", valueGetter: (_, row) => fullAddress(row) },
+    { field: "city", headerName: t(columnKeys.city), width: 105, valueGetter: (_, row) => row.address_city },
+    { field: "courier", headerName: t(columnKeys.courier), width: 140, renderCell: (p) => p.row.current_task?.courier?.name || <span className="muted">{t("detail_no_courier")}</span> },
+    { field: "priority", headerName: t(columnKeys.priority), width: 90, renderCell: (p) => <PriorityBadge priority={p.row.priority} /> },
+    { field: "status", headerName: t(columnKeys.status), width: 145, renderCell: (p) => <StatusBadge status={p.row.status} managerView /> },
+    //the kebab. not a sort key on the server, so no header click either
+    { field: "actions", headerName: "", width: 52, sortable: false, align: "center", renderCell: (p) => <IconButton size="small" aria-label={t("row_actions")} onClick={(e) => setMenu({ anchor: e.currentTarget, row: p.row })}><MoreVertIcon /></IconButton> },
+  ], [t]);
+
+  //the grid's hebrew plus the board's own two strings: the empty text and the "1-15 מתוך N הנפקות" range in the footer
+  const localeText = useMemo<Partial<GridLocaleText>>(() => ({
+    ...heIL.components.MuiDataGrid.defaultProps.localeText,
+    noRowsLabel: t("board_empty"),
+    paginationDisplayedRows: ({ from, to, count }) => t("board_range", { from, to, total: count }),
+  }), [t]);
+
+  //one menu for the grid rows and the cards, anchored to whichever kebab was tapped
   const actionsMenu = (
     <Menu open={!!menu} anchorEl={menu?.anchor} onClose={() => setMenu(null)}>
       <MenuItem onClick={() => act("change_date")}><ListItemIcon><CalendarMonthIcon fontSize="small" /></ListItemIcon>{t("row_change_date")}</MenuItem>
@@ -111,92 +163,98 @@ export function IssuancesTable({ rows, loading, selected, onSelect, sort, onSort
   );
 
   if (compact) {
-    return (
-      <div className={`issuance-cards ${loading ? "issuance-cards--loading" : ""}`}>
-        <div className="issuance-cards__toolbar">
-          <label className="issuance-cards__select-all">
-            <Checkbox size="small" checked={allChecked} onChange={toggleAll} />
-            {t("select_all")}
-          </label>
+    const from = total ? (page - 1) * PAGE_SIZE + 1 : 0;
+    const to = Math.min(page * PAGE_SIZE, total);
+    const lastPage = Math.max(Math.ceil(total / PAGE_SIZE), 1);
 
-          {/* no headers to click on a phone, the same columns in a select plus one button for the direction */}
-          <div className="issuance-cards__sort">
-            <TextField select label={t("sort_by")} value={sort?.key || ""} onChange={(e) => onSort(e.target.value ? { key: e.target.value as IssuanceSortKey, dir: sort?.dir || "asc" } : null)}>
-              <MenuItem value="">{t("sort_default")}</MenuItem>
-              {issuanceSortKeys.map((k) => (
-                <MenuItem key={k} value={k}>{t(columnKeys[k])}</MenuItem>
-              ))}
-            </TextField>
-            <IconButton aria-label={t("sort_toggle_dir")} disabled={!sort} onClick={flipDir}>
-              {sort?.dir === "desc" ? <ArrowDownwardIcon /> : <ArrowUpwardIcon />}
-            </IconButton>
-          </div>
+    return (
+      <>
+        {/* the cards have no footer, the range and its arrows stay above them as they were */}
+        <div className="board__range">
+          <span>{t("board_range", { from, to, total })}</span>
+          <button type="button" className="board__page-btn" disabled={page <= 1} onClick={() => onPage(page - 1)}>{"›"}</button>
+          <button type="button" className="board__page-btn" disabled={page >= lastPage} onClick={() => onPage(page + 1)}>{"‹"}</button>
         </div>
 
-        {rows.length === 0 && !loading && <div className="issuance-cards__empty">{t("board_empty")}</div>}
-        {rows.map((row) => (
-          <IssuanceCard
-            key={row.id}
-            row={row}
-            checked={selected.includes(row.id)}
-            canSelect={selectable.includes(row)}
-            onToggle={() => toggle(row.id)}
-            onOpen={() => onOpen(row)}
-            onMenu={(anchor) => setMenu({ anchor, row })}
-          />
-        ))}
+        <div className={`issuance-cards ${loading ? "issuance-cards--loading" : ""}`}>
+          <div className="issuance-cards__toolbar">
+            <label className="issuance-cards__select-all">
+              <Checkbox size="small" checked={allChecked} onChange={toggleAll} />
+              {t("select_all")}
+            </label>
 
-        {actionsMenu}
-      </div>
+            {/* no headers to click on a phone, the same columns in a select plus one button for the direction */}
+            <div className="issuance-cards__sort">
+              <TextField select label={t("sort_by")} value={sort?.key || ""} onChange={(e) => onSort(e.target.value ? { key: e.target.value as IssuanceSortKey, dir: sort?.dir || "asc" } : null)}>
+                <MenuItem value="">{t("sort_default")}</MenuItem>
+                {issuanceSortKeys.map((k) => (
+                  <MenuItem key={k} value={k}>{t(columnKeys[k])}</MenuItem>
+                ))}
+              </TextField>
+              <IconButton aria-label={t("sort_toggle_dir")} disabled={!sort} onClick={flipDir}>
+                {sort?.dir === "desc" ? <ArrowDownwardIcon /> : <ArrowUpwardIcon />}
+              </IconButton>
+            </div>
+          </div>
+
+          {rows.length === 0 && !loading && <div className="issuance-cards__empty">{t("board_empty")}</div>}
+          {rows.map((row) => (
+            <IssuanceCard
+              key={row.id}
+              row={row}
+              checked={selected.includes(row.id)}
+              canSelect={selectable.includes(row)}
+              onToggle={() => toggle(row.id)}
+              onOpen={() => onOpen(row)}
+              onMenu={(anchor) => setMenu({ anchor, row })}
+            />
+          ))}
+
+          {actionsMenu}
+        </div>
+      </>
     );
   }
 
   return (
-    <div className={`issuances-table ${loading ? "issuances-table--loading" : ""}`}>
-      <table>
-        <thead>
-          <tr>
-            <th className="col-check"><Checkbox size="small" checked={allChecked} onChange={toggleAll} /></th>
-            {sortableHeader("number")}
-            {sortableHeader("customer")}
-            {sortableHeader("destination")}
-            {sortableHeader("city")}
-            {sortableHeader("courier")}
-            {sortableHeader("priority")}
-            {sortableHeader("status")}
-            <th className="col-menu"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 && !loading && (
-            <tr><td colSpan={9} className="issuances-table__empty">{t("board_empty")}</td></tr>
-          )}
-          {rows.map((row) => {
-            const canSelect = selectable.includes(row);
-            return (
-              <tr key={row.id} className={selected.includes(row.id) ? "is-selected" : ""}>
-                <td className="col-check">
-                  <Checkbox size="small" checked={selected.includes(row.id)} disabled={!canSelect} onChange={() => toggle(row.id)} />
-                </td>
-                <td>
-                  <button type="button" className="link-button issuances-table__number" onClick={() => onOpen(row)}>{displayNumber(row)}</button>
-                </td>
-                <td className="col-wrap">{row.customer_name}</td>
-                <td className="col-wrap">{fullAddress(row)}</td>
-                <td>{row.address_city}</td>
-                <td>{row.current_task?.courier?.name || <span className="muted">{t("detail_no_courier")}</span>}</td>
-                <td><PriorityBadge priority={row.priority} /></td>
-                <td><StatusBadge status={row.status} managerView /></td>
-                <td className="col-menu">
-                  <IconButton size="small" onClick={(e) => setMenu({ anchor: e.currentTarget, row })}><MoreVertIcon /></IconButton>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <>
+      <DataGridPremium
+        className="issuances-grid"
+        rows={rows}
+        columns={columns}
+        loading={loading}
+        autoHeight
+        getRowHeight={() => "auto"}
+        localeText={localeText}
+        //server mode: page and sort are the board's state, the grid only draws them and reports the clicks.
+        //pagination itself is opt in on the premium grid (the mit one always pages), without it the footer is a row count
+        pagination
+        paginationMode="server"
+        rowCount={total}
+        paginationModel={paginationModel}
+        onPaginationModelChange={(m) => onPage(m.page + 1)}
+        pageSizeOptions={[PAGE_SIZE]}
+        sortingMode="server"
+        sortModel={sortModel}
+        onSortModelChange={changeSort}
+        disableMultipleColumnsSorting
+        //the filter bar above is the only filter. everything that only makes sense on the full set stays off,
+        //the column menu too (it is the way into pinning, hiding and grouping)
+        disableColumnFilter
+        disableColumnMenu
+        disableRowGrouping
+        disableAggregation
+        disablePivoting
+        checkboxSelection
+        disableRowSelectionOnClick
+        isRowSelectable={rowSelectable}
+        rowSelectionModel={selectionModel}
+        onRowSelectionModelChange={changeSelection}
+        hideFooterSelectedRowCount
+        slots={{ columnUnsortedIcon: UnsortedIcon }}
+      />
 
       {actionsMenu}
-    </div>
+    </>
   );
 }

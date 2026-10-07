@@ -45,6 +45,9 @@ export default defineConfig({
         navigateFallback: "/index.html",
         navigateFallbackDenylist: [/^\/api\//],
         globPatterns: ["**/*.{js,css,html,svg,woff2}"],
+        //the manager board's chunk (the data grid) and the grid's excel export chunk are not for the courier's offline
+        //shell: a tablet would download 1.8 MB it never opens. the manager loads them from the network like any page
+        globIgnores: ["**/IssuancesBoard-*.js", "**/exceljs*.js"],
         cleanupOutdatedCaches: true,
         runtimeCaching: [
           {

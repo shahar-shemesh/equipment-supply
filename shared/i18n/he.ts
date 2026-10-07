@@ -10,6 +10,8 @@ export const he = {
     save: "שמירה",
     search: "חיפוש",
     loading: "טוען...",
+    page_load_failed: "טעינת העמוד נכשלה",
+    page_reload: "טעינה מחדש",
     error_generic: "משהו השתבש, נסה שוב",
     yes: "כן",
     no: "לא",

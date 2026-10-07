@@ -111,9 +111,34 @@
     flex-direction: column;
     gap: 12px;
 
-    &__search .MuiOutlinedInput-root {
-        border-radius: 999px;
-        background: var(--color-surface);
+    // the search and the status quick actions share the first line, the actions wrap under it when the line is short
+    &__top {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px;
+    }
+
+    // a narrow box, the status buttons sit next to it. full width on a phone, where nothing fits beside it anyway
+    &__search {
+        flex: 1 1 260px;
+        max-width: 360px;
+
+        @include bp.phone {
+            flex-basis: 100%;
+            max-width: none;
+        }
+
+        .MuiOutlinedInput-root {
+            border-radius: 999px;
+            background: var(--color-surface);
+        }
+    }
+
+    &__quick {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
     }
 
     // as many fields per row as fit on desktop, a fixed count below it so the cells line up between rows
@@ -183,37 +208,7 @@
         background: var(--color-surface-2);
     }
 
-    // every column sorts. the faint up/down glyph from the design sits on the idle ones, a solid arrow on the sorted one
-    th.sortable {
-        cursor: pointer;
-        user-select: none;
-
-        > span {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-        }
-
-        .sort-hint {
-            opacity: 0.45;
-        }
-
-        &:hover .sort-hint {
-            opacity: 0.9;
-        }
-
-        &.is-sorted {
-            color: var(--color-primary);
-            font-weight: 600;
-        }
-    }
-
-    tr.is-selected td {
-        background: var(--color-primary-lighter);
-    }
-
-    .col-check,
-    .col-menu {
+    .col-check {
         width: 48px;
         padding: 4px 8px;
     }
@@ -236,6 +231,128 @@
         color: var(--color-text-secondary);
         padding: 40px !important;
     }
+}
+
+// a status badge as a toggle button (BoardFilters.tsx). off = faded, on = full color with a ring in the badge's own color
+.status-quick {
+    background: none;
+    border: none;
+    padding: 0;
+    border-radius: 999px;
+    cursor: pointer;
+    opacity: 0.55;
+    transition: opacity 0.15s;
+
+    &:hover {
+        opacity: 0.85;
+    }
+
+    &:focus-visible {
+        outline: 2px solid var(--color-primary);
+        outline-offset: 2px;
+    }
+
+    &.is-active {
+        opacity: 1;
+
+        .status-badge {
+            box-shadow: 0 0 0 2px currentColor;
+        }
+    }
+}
+
+// the data grid skin, the same surface as .issuances-table above (the conflicts and couriers tables keep that one).
+// two classes on every rule: the grid's emotion styles are injected after this sheet and a single class loses the tie.
+// the two --DataGrid variables are the grid's own hooks for the row border and the header background
+.issuances-grid.MuiDataGrid-root {
+    --DataGrid-rowBorderColor: var(--color-surface-2);
+    --DataGrid-t-header-background-base: var(--color-surface-2);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    font-size: 1rem;
+
+    // tighter cells so the nine columns fit a 1024 landscape tablet, like the old table
+    @include bp.tablet {
+        font-size: 14px;
+
+        .MuiDataGrid-cell {
+            padding: 10px;
+        }
+    }
+
+    .MuiDataGrid-columnHeader {
+        color: var(--color-text-secondary);
+    }
+
+    .MuiDataGrid-columnHeaderTitle {
+        font-weight: 500;
+    }
+
+    // the sorted column in blue, like the old header
+    .MuiDataGrid-columnHeader--sorted {
+        color: var(--color-primary);
+
+        .MuiDataGrid-columnHeaderTitle {
+            font-weight: 600;
+        }
+    }
+
+    // the faint up/down glyph stays on every idle column (the grid shows it on hover only and collapses its box)
+    .MuiDataGrid-iconButtonContainer {
+        visibility: visible;
+        width: auto;
+    }
+
+    .MuiDataGrid-columnHeader:not(.MuiDataGrid-columnHeader--sorted) .MuiDataGrid-sortButton {
+        opacity: 0.45;
+    }
+
+    .MuiDataGrid-columnHeader:not(.MuiDataGrid-columnHeader--sorted):hover .MuiDataGrid-sortButton {
+        opacity: 0.9;
+    }
+
+    // a table, not a spreadsheet: no focus ring on the clicked cell
+    .MuiDataGrid-cell:focus,
+    .MuiDataGrid-cell:focus-within,
+    .MuiDataGrid-columnHeader:focus,
+    .MuiDataGrid-columnHeader:focus-within {
+        outline: none;
+    }
+
+    .MuiDataGrid-cell {
+        padding: 12px 16px;
+        display: flex;
+        align-items: center;
+        line-height: 1.4;
+    }
+
+    // the free text cells (customer, destination) wrap instead of truncating, the row grows with them (getRowHeight auto)
+    .col-wrap {
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    .MuiDataGrid-row.Mui-selected,
+    .MuiDataGrid-row.Mui-selected:hover {
+        background: var(--color-primary-lighter);
+    }
+
+    .MuiDataGrid-footerContainer {
+        border-top: 1px solid var(--color-surface-2);
+        color: var(--color-text-secondary);
+    }
+
+    // one page size, the rows-per-page select has nothing to offer
+    .MuiTablePagination-selectLabel,
+    .MuiTablePagination-input {
+        display: none;
+    }
+}
+
+.issuances-grid__number {
+    font-weight: 500;
+    text-decoration: none;
 }
 
 // a plain table that turns into a list of cards on a phone (CouriersPage.tsx): the row is the card and every cell
@@ -722,8 +839,7 @@
             padding: 12px;
         }
 
-        .col-check,
-        .col-menu {
+        .col-check {
             padding: 0 2px;
         }
     }
