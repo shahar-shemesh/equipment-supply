@@ -1,12 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Checkbox, InputAdornment, ListItemText, MenuItem, TextField } from "@mui/material";
 import SearchIcon from "@mui/icons-material/Search";
+import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import dayjs from "dayjs";
 
 import { IssuanceStatus, Priority } from "../../../../shared/@core";
 import { priorityKeys } from "../../../../shared/@utils";
 import { StatusBadge } from "../../components/StatusBadge";
+import { formatDate } from "../../utils/format";
 
 //status and city are lists (the quick actions, the multi select), everything else is one value or nothing
 export const emptyFilters = { search: "", status: [] as string[], priority: "", customer: "", city: [] as string[], date: "" };
@@ -73,7 +75,7 @@ export function BoardFilters({ filters, cities, onChange }: { filters: any; citi
       </div>
 
       <div className="board-filters__row">
-        <TextField type="date" label={t("filter_date")} value={filters.date} onChange={(e) => set("date", e.target.value)} InputLabelProps={{ shrink: true }} />
+        <DateFilterField value={filters.date} onChange={(next) => set("date", next)} />
 
         <TextField select label={t("filter_priority")} value={filters.priority} onChange={(e) => set("priority", e.target.value)}>
           <MenuItem value="">{t("filter_all")}</MenuItem>
@@ -108,6 +110,55 @@ export function BoardFilters({ filters, cities, onChange }: { filters: any; citi
         )}
       </div>
     </div>
+  );
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//the native date input prints the browser's own order (mm/dd/yyyy on an english Chrome, whatever the page language is).
+//the field shows the value as DD/MM/YYYY instead, and the native input, invisible under its bottom edge, only does the
+//picking: showPicker() opens its popup right there. the value that goes up stays YYYY-MM-DD, as before
+export function DateFilterField({ value, onChange }: { value: string; onChange: (next: string) => void }) {
+  const { t } = useTranslation();
+  const native = useRef<HTMLInputElement>(null);
+
+  function open() {
+    try {
+      native.current.showPicker();
+    } catch {
+      native.current.focus(); //no showPicker (an old Safari): the native input at least takes the keyboard
+    }
+  }
+
+  return (
+    <TextField
+      className="board-filters__date"
+      label={t("filter_date")}
+      value={value ? formatDate(value) : ""}
+      placeholder={t("filter_date_placeholder")}
+      onClick={open}
+      InputLabelProps={{ shrink: true }}
+      InputProps={{
+        readOnly: true,
+        startAdornment: <InputAdornment position="start"><CalendarMonthIcon /></InputAdornment>,
+        //inside the input root on purpose: it is position: relative, so the popup opens under this very field
+        endAdornment: <input ref={native} type="date" className="board-filters__native-date" tabIndex={-1} aria-hidden value={value} onChange={(e) => onChange(e.target.value)} />,
+      }}
+      inputProps={{
+        "aria-haspopup": "dialog",
+        title: t("filter_date_open"),
+        onKeyDown: (e: React.KeyboardEvent) => {
+          if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") {
+            e.preventDefault();
+            open();
+          } else if ((e.key === "Backspace" || e.key === "Delete") && value) {
+            //the native input cleared with these keys, the read-only field would swallow them
+            e.preventDefault();
+            onChange("");
+          }
+        },
+      }}
+    />
   );
 }
 

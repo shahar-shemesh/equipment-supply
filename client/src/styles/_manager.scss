@@ -106,10 +106,26 @@
     }
 }
 
+// the board page reserves the room of its scrollbar from the first paint. the grid flexes its columns against the width it
+// measures when it mounts, before the rows give the page a scrollbar, and it does not measure again: without this the
+// columns end up 15px wider than their box and the grid scrolls sideways for nothing. scoped to the page that has the
+// board (on the others the gutter would only be a blank strip) and to the widths where it is a grid, not cards
+@include bp.above-compact {
+    html:has(.board) {
+        scrollbar-gutter: stable;
+    }
+}
+
 .board-filters {
     display: flex;
     flex-direction: column;
     gap: 12px;
+
+    // the toolbar and the table are one block: the same gap between the toolbar's lines as between it and the table
+    @include bp.above-compact {
+        gap: 16px;
+        margin-bottom: 16px;
+    }
 
     // the search and the status quick actions share the first line, the actions wrap under it when the line is short
     &__top {
@@ -117,12 +133,22 @@
         flex-wrap: wrap;
         align-items: center;
         gap: 12px;
+
+        @include bp.above-compact {
+            gap: 12px 16px;
+        }
     }
 
-    // a narrow box, the status buttons sit next to it. full width on a phone, where nothing fits beside it anyway
+    // a compact box, the status buttons sit next to it. full width on a phone, where nothing fits beside it anyway.
+    // the placeholder is longer than the box, it ends in an ellipsis instead of being cut mid letter
     &__search {
         flex: 1 1 260px;
         max-width: 360px;
+
+        // smaller still next to the table, the status buttons need the room on one line at 1440
+        @include bp.above-compact {
+            max-width: 320px;
+        }
 
         @include bp.phone {
             flex-basis: 100%;
@@ -133,15 +159,20 @@
             border-radius: 999px;
             background: var(--color-surface);
         }
+
+        .MuiInputBase-input {
+            text-overflow: ellipsis;
+        }
     }
 
     &__quick {
         display: flex;
         flex-wrap: wrap;
+        align-items: center;
         gap: 8px;
     }
 
-    // as many fields per row as fit on desktop, a fixed count below it so the cells line up between rows
+    // a fixed count of cells per row under 900 (tablet portrait, phone) so the cells line up between rows
     &__row {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
@@ -155,6 +186,20 @@
             grid-template-columns: repeat(2, 1fr);
         }
 
+        // the table's widths: one line of fields of the same size, none of them wider than it needs. a wide screen adds
+        // room around them, not inside them
+        @include bp.above-compact {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 16px;
+
+            .MuiTextField-root {
+                flex: 1 1 180px;
+                max-width: 220px;
+            }
+        }
+
         .MuiTextField-root {
             min-width: 0;
             width: 100%;
@@ -165,11 +210,40 @@
     &__clear {
         // a text button stretched to the cell looks like a field, keep it at its own width
         justify-self: start;
+        flex: none;
 
         @include bp.phone {
             grid-column: 1 / -1;
             justify-self: stretch;
         }
+    }
+
+    // the delivery date prints DD/MM/YYYY itself (BoardFilters.tsx), the native input under its bottom edge only opens
+    // the picker. the whole field is the button
+    &__date {
+        cursor: pointer;
+
+        .MuiInputBase-root,
+        .MuiInputBase-input {
+            cursor: pointer;
+        }
+
+        // the shrunk label takes clicks and hands each one on to the input: a tap on it would ask for the picker twice
+        .MuiInputLabel-root {
+            pointer-events: none;
+        }
+    }
+
+    &__native-date {
+        position: absolute;
+        inset-inline: 0;
+        bottom: 0;
+        width: 100%;
+        height: 1px;
+        padding: 0;
+        border: none;
+        opacity: 0;
+        pointer-events: none;
     }
 }
 
@@ -233,18 +307,25 @@
     }
 }
 
-// a status badge as a toggle button (BoardFilters.tsx). off = faded, on = full color with a ring in the badge's own color
+// a status badge as a toggle button (BoardFilters.tsx). off = a white pill with a neutral outline and the status color on
+// the text, on = the badge's own tint with a ring in its color. the same box either way, so nothing moves when one is
+// toggled; the ring is inset for that reason too
 .status-quick {
     background: none;
     border: none;
     padding: 0;
     border-radius: 999px;
     cursor: pointer;
-    opacity: 0.55;
-    transition: opacity 0.15s;
 
-    &:hover {
-        opacity: 0.85;
+    .status-badge {
+        padding: 8px 12px;
+        background: var(--color-surface);
+        box-shadow: inset 0 0 0 1px var(--color-border);
+        transition: background-color 0.15s, box-shadow 0.15s;
+    }
+
+    &:hover .status-badge {
+        box-shadow: inset 0 0 0 1px currentColor;
     }
 
     &:focus-visible {
@@ -252,11 +333,16 @@
         outline-offset: 2px;
     }
 
-    &.is-active {
-        opacity: 1;
+    &.is-active .status-badge {
+        background: var(--badge-bg);
+        box-shadow: inset 0 0 0 1.5px currentColor;
+    }
 
-        .status-badge {
-            box-shadow: 0 0 0 2px currentColor;
+    // high contrast mode drops shadows and tints, and the ring is the one cue of a button that is on: an outline survives it
+    @media (forced-colors: active) {
+        &.is-active .status-badge {
+            outline: 2px solid ButtonText;
+            outline-offset: -2px;
         }
     }
 }
@@ -271,18 +357,31 @@
     border: 1px solid var(--color-border);
     border-radius: 12px;
     font-size: 1rem;
+    // the one horizontal inset of the header and the cells: a title starts where its values start
+    --grid-inset: 12px;
 
     // tighter cells so the nine columns fit a 1024 landscape tablet, like the old table
     @include bp.tablet {
         font-size: 14px;
-
-        .MuiDataGrid-cell {
-            padding: 10px;
-        }
+        --grid-inset: 10px;
     }
 
     .MuiDataGrid-columnHeader {
         color: var(--color-text-secondary);
+        padding: 0 var(--grid-inset);
+    }
+
+    // the badge columns centre their title over the badge. the sort button would push the title off centre by its own
+    // width, so it takes no room and hangs off the end of the title instead, into the inset of the header. the title
+    // container must not clip it: the priority column at its floor has no more room than that
+    .MuiDataGrid-columnHeader--alignCenter {
+        .MuiDataGrid-iconButtonContainer {
+            width: 0;
+        }
+
+        .MuiDataGrid-columnHeaderTitleContainer {
+            overflow: visible;
+        }
     }
 
     .MuiDataGrid-columnHeaderTitle {
@@ -321,13 +420,22 @@
     }
 
     .MuiDataGrid-cell {
-        padding: 12px 16px;
+        padding: 8px var(--grid-inset);
         display: flex;
         align-items: center;
         line-height: 1.4;
     }
 
-    // the free text cells (customer, destination) wrap instead of truncating, the row grows with them (getRowHeight auto)
+    // the checkbox and the kebab are the whole content of their cells, an inset would only push them out of it. the empty
+    // filler cell at the end of every row too: with an inset it is 2 insets wide and the grid scrolls sideways for it
+    .MuiDataGrid-cellCheckbox,
+    .MuiDataGrid-columnHeaderCheckbox,
+    .MuiDataGrid-cellEmpty,
+    .col-tight {
+        padding: 0;
+    }
+
+    // the free text cells (customer, destination, city, courier) wrap instead of truncating, the row grows with them (getRowHeight auto)
     .col-wrap {
         white-space: normal;
         overflow-wrap: anywhere;
@@ -865,6 +973,11 @@
 
     .issuance-card .MuiCheckbox-root,
     .issuance-cards__select-all .MuiCheckbox-root {
+        padding: 12px;
+    }
+
+    // the data grid's small checkboxes too, a tablet landscape shows the grid: 20px icon + 12px around it = 44px
+    .issuances-grid.MuiDataGrid-root .MuiCheckbox-root {
         padding: 12px;
     }
 

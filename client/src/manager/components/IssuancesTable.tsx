@@ -130,19 +130,21 @@ export function IssuancesTable({ rows, total, page, loading, selected, onSelect,
   const onOpenRef = useRef(onOpen);
   onOpenRef.current = onOpen;
 
-  //the fixed widths add up to 962 with the checkbox column, what a 1024 landscape tablet leaves the grid after the
-  //gutters. the two flex columns take whatever a wider screen adds
+  //every column flexes between a floor and a cap. the floor is the header (title + sort button + padding) or the widest
+  //value, whichever is wider, and the floors plus the checkbox and the kebab add up to 920px: what the grid gets at 1440,
+  //where the widgets column takes the rest. the badge columns are capped so a wide screen does not stretch them, the free
+  //text ones (customer, destination, courier, city) have no cap and take the surplus
   const columns = useMemo<GridColDef<IIssuance>[]>(() => [
-    { field: "number", headerName: t(columnKeys.number), width: 120, renderCell: (p) => <button type="button" className="link-button issuances-grid__number" onClick={() => onOpenRef.current(p.row)}>{displayNumber(p.row)}</button> },
-    { field: "customer", headerName: t(columnKeys.customer), flex: 1, minWidth: 120, cellClassName: "col-wrap", valueGetter: (_, row) => row.customer_name },
-    { field: "destination", headerName: t(columnKeys.destination), flex: 1.2, minWidth: 140, cellClassName: "col-wrap", valueGetter: (_, row) => fullAddress(row) },
-    { field: "city", headerName: t(columnKeys.city), width: 105, valueGetter: (_, row) => row.address_city },
+    { field: "number", headerName: t(columnKeys.number), flex: 1, minWidth: 148, maxWidth: 180, renderCell: (p) => <button type="button" className="link-button issuances-grid__number" onClick={() => onOpenRef.current(p.row)}>{displayNumber(p.row)}</button> },
+    { field: "customer", headerName: t(columnKeys.customer), flex: 1.2, minWidth: 100, cellClassName: "col-wrap", valueGetter: (_, row) => row.customer_name },
+    { field: "destination", headerName: t(columnKeys.destination), flex: 2, minWidth: 130, cellClassName: "col-wrap", valueGetter: (_, row) => fullAddress(row) },
+    { field: "city", headerName: t(columnKeys.city), flex: 0.9, minWidth: 96, cellClassName: "col-wrap", valueGetter: (_, row) => row.address_city },
     //the manager who handed a self pickup over at the warehouse stands where the courier would be
-    { field: "courier", headerName: t(columnKeys.courier), width: 140, renderCell: (p) => p.row.current_task?.courier?.name || p.row.delivered_by_name || <span className="muted">{t("detail_no_courier")}</span> },
-    { field: "priority", headerName: t(columnKeys.priority), width: 90, renderCell: (p) => <PriorityBadge priority={p.row.priority} /> },
-    { field: "status", headerName: t(columnKeys.status), width: 145, renderCell: (p) => <StatusBadge status={p.row.status} managerView /> },
-    //the kebab. not a sort key on the server, so no header click either
-    { field: "actions", headerName: "", width: 52, sortable: false, align: "center", renderCell: (p) => <IconButton size="small" aria-label={t("row_actions")} onClick={(e) => setMenu({ anchor: e.currentTarget, row: p.row })}><MoreVertIcon /></IconButton> },
+    { field: "courier", headerName: t(columnKeys.courier), flex: 1, minWidth: 100, cellClassName: "col-wrap", renderCell: (p) => p.row.current_task?.courier?.name || p.row.delivered_by_name || <span className="muted">{t("detail_no_courier")}</span> },
+    { field: "priority", headerName: t(columnKeys.priority), flex: 0.7, minWidth: 104, maxWidth: 130, align: "center", headerAlign: "center", renderCell: (p) => <PriorityBadge priority={p.row.priority} /> },
+    { field: "status", headerName: t(columnKeys.status), flex: 1, minWidth: 142, maxWidth: 190, align: "center", headerAlign: "center", renderCell: (p) => <StatusBadge status={p.row.status} managerView /> },
+    //the kebab. not a sort key on the server, so no header click either. the button is the whole cell (col-tight)
+    { field: "actions", headerName: "", width: 50, sortable: false, align: "center", headerAlign: "center", headerClassName: "col-tight", cellClassName: "col-tight", renderCell: (p) => <IconButton size="small" aria-label={t("row_actions")} onClick={(e) => setMenu({ anchor: e.currentTarget, row: p.row })}><MoreVertIcon /></IconButton> },
   ], [t]);
 
   //the grid's hebrew plus the board's own two strings: the empty text and the "1-15 מתוך N הנפקות" range in the footer
@@ -226,6 +228,7 @@ export function IssuancesTable({ rows, total, page, loading, selected, onSelect,
         loading={loading}
         autoHeight
         getRowHeight={() => "auto"}
+        columnHeaderHeight={48}
         localeText={localeText}
         //server mode: page and sort are the board's state, the grid only draws them and reports the clicks.
         //pagination itself is opt in on the premium grid (the mit one always pages), without it the footer is a row count
@@ -253,6 +256,7 @@ export function IssuancesTable({ rows, total, page, loading, selected, onSelect,
         onRowSelectionModelChange={changeSelection}
         hideFooterSelectedRowCount
         slots={{ columnUnsortedIcon: UnsortedIcon }}
+        slotProps={{ baseCheckbox: { size: "small" } }}
       />
 
       {actionsMenu}

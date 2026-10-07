@@ -6,7 +6,9 @@
     border-radius: 999px;
     font-size: 14px;
     white-space: nowrap;
-    background: var(--color-surface-2);
+    // the tint is a variable so the board's status buttons (.status-quick) can show it only when they are on
+    --badge-bg: var(--color-surface-2);
+    background: var(--badge-bg);
     color: var(--color-text-secondary);
 
     svg {
@@ -14,27 +16,27 @@
     }
 
     &--assigned {
-        background: var(--color-primary-light);
+        --badge-bg: var(--color-primary-light);
         color: var(--color-primary);
     }
 
     &--delivered {
-        background: var(--color-success-bg);
+        --badge-bg: var(--color-success-bg);
         color: #1B7F45;
     }
 
     &--partially_delivered {
-        background: var(--color-warning-bg);
+        --badge-bg: var(--color-warning-bg);
         color: #9A6300;
     }
 
     &--not_delivered {
-        background: var(--color-danger-bg);
+        --badge-bg: var(--color-danger-bg);
         color: var(--color-danger);
     }
 
     &--self_pickup {
-        background: var(--color-primary-light);
+        --badge-bg: var(--color-primary-light);
         color: var(--color-primary-dark);
     }
 

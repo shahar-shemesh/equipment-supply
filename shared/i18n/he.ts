@@ -38,6 +38,8 @@ export const he = {
     find_issuance: "איתור הנפקה",
     board_search_placeholder: "חיפוש חופשי- שם לקוח, מספר הנפקה, כתובת, עיר...",
     filter_date: "תאריך מסירה",
+    filter_date_placeholder: "בחירת תאריך",
+    filter_date_open: "פתיחת לוח שנה",
     filter_status: "סטטוס",
     filter_priority: "עדיפות",
     filter_customer: "לקוח",
