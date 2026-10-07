@@ -150,7 +150,9 @@ export interface IIssuance {
   delete_reason?: string;
   items?: IIssuanceItem[];
   tasks?: IDeliveryTask[];
-  current_task?: IDeliveryTask; //derived on the server, the open task or the last closed one
+  current_task?: IDeliveryTask; //derived on the server, the open task or the last closed one; null while the status is self_pickup
+  delivered_by_user_id?: number | null; //the manager who handed over at the warehouse (self pickup), null for a courier delivery
+  delivered_by_name?: string | null; //that manager's display name, derived on the server; the board shows it where the courier would be
   created_at?: string;
   updated_at?: string;
 }
@@ -158,7 +160,7 @@ export interface IIssuance {
 export interface IDeliveryTask {
   id: number;
   issuance_id: number;
-  courier_id: number;
+  courier_id: number | null; //null for a self pickup handover task, closed by the manager at the warehouse
   status: TaskStatus;
   scheduled_date?: string;
   assigned_by?: number;
@@ -327,6 +329,7 @@ export enum AuditAction {
   issuance_assign = "issuance.assign",
   issuance_edit = "issuance.edit",
   issuance_self_pickup = "issuance.self_pickup",
+  issuance_self_pickup_report = "issuance.self_pickup_report", //the manager handed over at the warehouse
   issuance_mark_urgent = "issuance.mark_urgent",
   issuance_delete = "issuance.delete",
   courier_create = "courier.create",

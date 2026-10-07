@@ -827,6 +827,25 @@
 
 }
 
+// the self pickup handover form over the detail dialog. the blocks inside are the courier's (.item-report, .task-section,
+// .toggle-pair, .signature-pad in _courier.scss), this only stacks them and gives the send button its size
+.handover-dialog {
+    &__form {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    &__section-title {
+        margin-top: 8px;
+    }
+
+    &__submit.MuiButton-root {
+        height: 52px;
+        font-size: 18px;
+    }
+}
+
 // fingers: rows and the things inside them grow to the 44px target. the icon buttons get theirs from _basic.scss
 @include bp.touch {
     .issuances-table {

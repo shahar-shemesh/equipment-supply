@@ -8,12 +8,14 @@ import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import ErrorIcon from "@mui/icons-material/Error";
+import HandshakeIcon from "@mui/icons-material/Handshake";
 
 import { IIssuance, IssuanceStatus, Priority } from "../../../../shared/@core";
 import { reasonKeys } from "../../../../shared/@utils";
 import { StatusBadge } from "../../components/StatusBadge";
 import { del, errorMessage, get, patch } from "../../utils/service";
 import { displayNumber, fullAddress } from "../../utils/format";
+import { SelfPickupReportDialog } from "./SelfPickupReportDialog";
 
 type Props = {
   id: number; //null closes the dialog
@@ -30,6 +32,7 @@ export function IssuanceDetailDialog({ id, onClose, onChanged, onAssign }: Props
   const [error, setError] = useState("");
   const [deleteStep, setDeleteStep] = useState<"none" | "reason" | "confirm" | "done">("none");
   const [deleteReason, setDeleteReason] = useState("");
+  const [handover, setHandover] = useState(false); //the self pickup report form over this dialog
 
   async function load() {
     try {
@@ -44,6 +47,7 @@ export function IssuanceDetailDialog({ id, onClose, onChanged, onAssign }: Props
     setError("");
     setDeleteStep("none");
     setDeleteReason("");
+    setHandover(false);
     if (id) load();
   }, [id]);
 
@@ -112,7 +116,8 @@ export function IssuanceDetailDialog({ id, onClose, onChanged, onAssign }: Props
               </div>
               <div className="field">
                 <label>{t("detail_courier")}</label>
-                <strong>{issuance.current_task?.courier?.name || t("detail_no_courier")}</strong>
+                {/* a self pickup handed over at the warehouse has no courier, the manager who did it stands there */}
+                <strong>{issuance.current_task?.courier?.name || issuance.delivered_by_name || t("detail_no_courier")}</strong>
                 {!closed && (
                   <button type="button" className="link-button with-icon" onClick={() => onAssign(issuance.id)}>
                     <EditIcon fontSize="inherit" /> {t("change_courier")}
@@ -144,6 +149,11 @@ export function IssuanceDetailDialog({ id, onClose, onChanged, onAssign }: Props
               {!closed && (
                 <Button variant="outlined" startIcon={<PersonIcon />} onClick={() => update({ self_pickup: true })}>
                   {t("row_self_pickup")}
+                </Button>
+              )}
+              {issuance.status === IssuanceStatus.self_pickup && (
+                <Button variant="contained" startIcon={<HandshakeIcon />} onClick={() => setHandover(true)}>
+                  {t("self_pickup_report")}
                 </Button>
               )}
               {issuance.status !== IssuanceStatus.deleted && deleteStep === "none" && (
@@ -178,6 +188,16 @@ export function IssuanceDetailDialog({ id, onClose, onChanged, onAssign }: Props
           </>
         )}
       </DialogContent>
+
+      {/* the handover form. the detail behind it reloads on success, so closing it shows the manager under שליח */}
+      <SelfPickupReportDialog
+        issuance={handover ? issuance : null}
+        onClose={() => setHandover(false)}
+        onChanged={() => {
+          load();
+          onChanged();
+        }}
+      />
 
       {/* second confirmation, the design shows it as its own modal */}
       <Dialog open={deleteStep === "confirm"} onClose={() => setDeleteStep("reason")} maxWidth="sm" fullWidth>

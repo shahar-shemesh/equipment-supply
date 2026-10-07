@@ -92,7 +92,9 @@ export function buildIssuances() {
       courier = couriers[0].name;
     }
     if (n === 22) {
+      //n % 3 === 1 gave this row a courier above. self pickup means nobody drives it: no task, and no courier on the board
       status = IssuanceStatus.self_pickup;
+      courier = null;
     }
 
     const itemCount = n % 4 === 0 ? 2 : n === 7 ? 3 : 1;

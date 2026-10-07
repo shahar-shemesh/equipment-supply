@@ -10,6 +10,7 @@ All routes are under `/api` and need `Authorization: Bearer <token>` except logi
 | `GET /issuances`, `GET /issuances/:id`, `GET /issuances/summary` | manager | board (`?sort=number|customer|destination|city|courier|priority|status&order=asc|desc`, filters, paging; `status`, `priority` and `city` also take a comma list, `status=assigned,delivered` is an `IN`), detail, the cities widget |
 | `PATCH /issuances/:id` | manager | priority, delivery date, notes, self pickup |
 | `POST /issuances/assign`, `POST /issuances/mark-urgent` | manager | bulk actions |
+| `POST /issuances/:id/self-pickup/report` | manager | the handover at the warehouse of a `self_pickup` issuance: the courier's report body (`IAttemptPayload` without the offline fields), checked by the same validators; answers the issuance as `GET /issuances/:id` does, 201; 409 from any other status, a second report included |
 | `DELETE /issuances/:id` | manager | soft delete with a reason |
 | `GET /couriers` | manager | couriers with their open task count |
 | `POST /couriers`, `PATCH /couriers/:id` | manager | add / edit (name, id number, phone); a deleted courier with the same id number comes back on add |
@@ -37,5 +38,11 @@ Made for the offline work, in `shared/@core.ts`:
 Made for the audit log, in `shared/@core.ts`:
 
 - `GET /audit` is new, manager only, see the audit paragraph under [Rules enforced on the server](domain.md#rules-enforced-on-the-server) for what is recorded. The shared types are `AuditActorType`, `AuditAction` (the closed action list), `AuditEntityType`, `IAuditEntry` and `IAuditPage`. No other route changed its body or its status codes; `POST /issuances/mark-urgent` still answers `{ updated }` with the count of editable rows.
+
+Made for the self pickup handover, in `shared/@core.ts`:
+
+- `POST /issuances/:id/self-pickup/report` is new, manager only. The body is the courier's `IAttemptPayload` without `operation_id`, `issuance_revision` and `client_reported_at` (sent anyway they are ignored: the route is online only, there is no replay and no revision check). The outcome is derived from the item answers like a courier report and becomes the issuance status (`delivered`, `partially_delivered` or `not_delivered`) with `self_pickup` kept `true`; the attempt hangs off a new done task with `courier_id: null` and `assigned_by` the manager. The answer is the issuance as `GET /issuances/:id` returns it.
+- `IIssuance` gained `delivered_by_user_id` (the manager who handed over, `users.id` from the token; null for every courier delivery) and `delivered_by_name` (derived, the display name the board shows where the courier would be). `IDeliveryTask.courier_id` is now `number | null`. `AuditAction` gained `issuance.self_pickup_report`.
+- `GET /issuances` and `GET /issuances/:id` answer `current_task: null` and `delivered_by_name: null` while the status is `self_pickup`, whatever closed tasks the issuance has: the courier side ended and the handover is ahead. The `courier` sort key is null for those rows too, and the manager's name for a handed over row, so the sort and the column agree.
 
 Nothing else in the API changed.

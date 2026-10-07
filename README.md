@@ -21,11 +21,11 @@ The UI is Hebrew and right to left. The Figma exports the screens follow live un
 
 What runs today:
 
-- Manager board on MUI X Data Grid Premium (server paging and sorting, the cards under 900px), with search, status quick actions, a city multi select next to the other filters, bulk assign and mark urgent, the issuance detail dialog (priority, delivery date, self pickup, delete with a reason), courier management (add, edit, delete), reports placeholder.
+- Manager board on MUI X Data Grid Premium (server paging and sorting, the cards under 900px), with search, status quick actions, a city multi select next to the other filters, bulk assign and mark urgent, the issuance detail dialog (priority, delivery date, self pickup and its handover at the warehouse with the courier's report form, delete with a reason), courier management (add, edit, delete), reports placeholder.
 - Courier board with tabs and search, grouped cards for the same address, the delivery report (per item delivered / not delivered with a reason; recipient and signature only when at least one item was delivered), lookup by issuance number.
 - Courier work without a network: the task list is downloaded to the device, drafts and signed reports live in IndexedDB, a sync worker sends queued reports with an operation id the server treats as idempotent, a service worker serves the built app offline. See [Offline courier work](docs/offline-sync.md).
 - NestJS API with role based access, server side validation of the delivery report, status transition rules, row locking for concurrent requests, idempotent delivery reports, an append-only audit log of every state change readable through `GET /api/audit` (see [Domain model and server rules](docs/domain.md#rules-enforced-on-the-server)).
-- PostgreSQL schema with four migrations, a seed with 30 handcrafted issuances plus 2000 generated ones, 228 tests (149 server, 79 client).
+- PostgreSQL schema with five migrations, a seed with 30 handcrafted issuances plus 2000 generated ones, 244 tests (165 server, 79 client).
 - Responsive layout for phone, tablet and desktop.
 
 What does not exist: the SAP interface, history and analytics screens, PDF / SMS / email confirmations, the courier Excel import, production authentication, synchronization while the app is closed (no Background Sync), raster and iOS home screen icons, any way for a manager to apply, merge or reassign a rejected report (the manager can read it and mark it reviewed, see [Unresolved reports](docs/offline-sync.md#unresolved-reports)). Details under [Sample data and what is missing](#sample-data-and-what-is-missing).
@@ -46,7 +46,7 @@ client/src
   components/      Logo, StatusBadge
   courier/         CourierLayout, pages (DeliveryBoard, TaskDetailPage, ReportDetailPage), components (TaskCard, ItemReportCard, SignaturePad, FindIssuanceDialog, SyncStatusBar, PendingReportsDialog, SyncChip)
   courier/offline/ the local data layer: db (IndexedDB layout), store (reads, drafts, reports, overlay, the evidence axis), sync (the worker: reports, evidence uploads, review status), useCourierData (hooks), identity, storage, uuid, sw (service worker registration), the vitest specs
-  manager/         ManagerLayout, pages (IssuancesBoard, CouriersPage, ConflictsPage, ReportsPage), components (IssuancesTable, IssuanceCard, BoardFilters, SideWidgets, AssignCourierDialog, IssuanceDetailDialog, CourierDialog, ConflictDetailDialog)
+  manager/         ManagerLayout, pages (IssuancesBoard, CouriersPage, ConflictsPage, ReportsPage), components (IssuancesTable, IssuanceCard, BoardFilters, SideWidgets, AssignCourierDialog, IssuanceDetailDialog, SelfPickupReportDialog, CourierDialog, ConflictDetailDialog)
   pages/           LoginPage
   routers/         AppRouter (two route trees: /manager and /courier)
   styles/          _breakpoints, _basic, _layouts, _layout-manager, _layout-courier, _manager, _courier, _badges, _login
@@ -63,7 +63,7 @@ server/src
   couriers/        courier management: list with open task count, add, edit, soft delete, form validation
   delivery/        courier side: my tasks, delivery report, payload validation, operation.ts (operation id, payload hash, client time); conflicts.service / conflicts.controller: rejected reports kept as evidence and the manager review
   entities/        TypeORM entities
-  migrations/      hand written migrations (OfflineSync, ConflictEvidence, NoRecipientWithoutDelivery, AuditLog)
+  migrations/      hand written migrations (OfflineSync, ConflictEvidence, NoRecipientWithoutDelivery, AuditLog, SelfPickupHandover)
   seed/            sample data
   e2e/             database backed tests
   data-source.ts   the DataSource the TypeORM CLI uses for migrations
@@ -149,7 +149,7 @@ cd server && npm run test:unit   # no database needed
 cd client && npm test
 ```
 
-Server: 149 tests in 16 suites (jest; 76 unit, 73 e2e). The unit specs next to the code cover the payload validation, the transition table, the courier form validation, the issuance lookup, `delivery/operation.ts`, the audit diff, the audit query validation, the audit row scrub, the generated seed rows and the `SEED_BULK` reader without a database. `src/e2e/` boots the real application with supertest against `equipment_supply_test` (created on first run): the delivery report and its rules, the offline sync route with operation ids, the evidence of rejected reports and its manager review, courier management, the audit log (every recorded action, what writes nothing, the manager's read), and the board paging walked page by page on the 2030 seeded issuances against SQL (totals, sorts, filters, the deleted rows, the tasks and attempts the seed writes).
+Server: 165 tests in 17 suites (jest; 78 unit, 87 e2e). The unit specs next to the code cover the payload validation, the transition table, the courier form validation, the issuance lookup, `delivery/operation.ts`, the audit diff, the audit query validation, the audit row scrub, the seed rows and the `SEED_BULK` reader without a database. `src/e2e/` boots the real application with supertest against `equipment_supply_test` (created on first run): the delivery report and its rules, the offline sync route with operation ids, the evidence of rejected reports and its manager review, courier management, the audit log (every recorded action, what writes nothing, the manager's read), the self pickup handover (the move, the manager's report and its refusals, the courier side untouched, the courier sort), and the board paging walked page by page on the 2030 seeded issuances against SQL (totals, sorts, filters, the deleted rows, the tasks and attempts the seed writes).
 
 Client: 79 tests in 9 files (vitest on jsdom with `fake-indexeddb`, see `client/src/test/setup.ts`), no browser. They cover the offline data layer (`db`, `store`, `refresh`, `sync`), the service worker update hold (`sw`), two components (`FindNumberDialog`, `QrCamera`), the board's filter query (`boardFilters`) and the adapters between the data grid's models and the board's state (`issuancesTable`).
 

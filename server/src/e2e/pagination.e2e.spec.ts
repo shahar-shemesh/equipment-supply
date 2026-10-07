@@ -7,7 +7,7 @@ import { Client } from 'pg';
 import request from 'supertest';
 
 import { AppModule } from '../app.module';
-import { AuditAction, IssuanceStatus, NonDeliveryReason, Priority, TaskStatus, UserRole } from '../../../shared/@core';
+import { AttemptOutcome, AuditAction, IssuanceStatus, NonDeliveryReason, Priority, TaskStatus, UserRole } from '../../../shared/@core';
 import { AuditLog } from '../entities';
 import { buildBulkIssuances, buildIssuances, users as seedUsers } from '../seed/seed.data';
 import { SeedService } from '../seed/seed.service';
@@ -66,7 +66,7 @@ afterAll(async () => {
 /*──────────────────────────────────────────────────────────────────────────*/
 
 //the courier pick of COURIER_NAME_SQL in issuances.service, so a sort by courier can be checked against sql
-const COURIER_SQL = `(SELECT c.name FROM delivery_tasks t JOIN couriers c ON c.id = t.courier_id WHERE t.issuance_id = i.id AND t.status != '${TaskStatus.cancelled}' ORDER BY (t.status = '${TaskStatus.pending}') DESC, t.id DESC LIMIT 1)`;
+const COURIER_SQL = `CASE WHEN i.status = '${IssuanceStatus.self_pickup}' THEN NULL ELSE COALESCE((SELECT c.name FROM delivery_tasks t LEFT JOIN couriers c ON c.id = t.courier_id WHERE t.issuance_id = i.id AND t.status != '${TaskStatus.cancelled}' ORDER BY (t.status = '${TaskStatus.pending}') DESC, t.id DESC LIMIT 1), (SELECT u.display_name FROM users u WHERE u.id = i.delivered_by_user_id)) END`;
 
 async function list(query: string) {
     const res = await request(app.getHttpServer()).get(`/api/issuances?${query}`).set('Authorization', `Bearer ${token}`);
@@ -130,6 +130,10 @@ describe('the seeded set', () => {
         expect(await countOf('delivery_tasks')).toBe(withTask.length);
         expect(await countOf(`delivery_tasks WHERE status = '${TaskStatus.pending}'`)).toBe(withTask.length - closed.length);
         expect(await countOf('delivery_attempts')).toBe(closed.length);
+        //and every one of them carries a real outcome: the handcrafted self pickup row used to get one with 'self_pickup', a value AttemptOutcome does not have
+        expect(await countOf(`delivery_attempts WHERE outcome NOT IN (${Object.values(AttemptOutcome).map((o) => `'${o}'`).join(', ')})`)).toBe(0);
+        //and no task sits on an issuance that never had a delivery
+        expect(await countOf(`delivery_tasks t JOIN issuances i ON i.id = t.issuance_id WHERE i.status IN ('${IssuanceStatus.unassigned}', '${IssuanceStatus.self_pickup}', '${IssuanceStatus.deleted}')`)).toBe(0);
         expect(await countOf('delivery_attempt_items')).toBe(closed.reduce((n, r) => n + r.items.length, 0));
 
         //a generated partial delivery: line 1 delivered, the rest refused with a reason

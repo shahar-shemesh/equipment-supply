@@ -42,7 +42,7 @@ export function IssuanceCard({ row, checked, canSelect, onToggle, onOpen, onMenu
       </div>
 
       <div className="issuance-card__row">
-        <span><label>{t("col_courier")}</label>{row.current_task?.courier?.name || <span className="muted">{t("detail_no_courier")}</span>}</span>
+        <span><label>{t("col_courier")}</label>{row.current_task?.courier?.name || row.delivered_by_name || <span className="muted">{t("detail_no_courier")}</span>}</span>
         <PriorityBadge priority={row.priority} />
       </div>
     </div>

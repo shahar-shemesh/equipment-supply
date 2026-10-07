@@ -1,8 +1,9 @@
-import { Column, CreateDateColumn, Entity, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
+import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
 
 import { IssuanceStatus, Priority } from '../../../shared/@core';
 import { IssuanceItem } from './issuance-item.entity';
 import { DeliveryTask } from './delivery-task.entity';
+import { User } from './user.entity';
 
 //the SAP document: who gets what, where. exists whether or not anyone was sent to deliver it.
 //everything a courier does with it lives in delivery_tasks / delivery_attempts, this row only mirrors the latest outcome in status
@@ -61,6 +62,15 @@ export class Issuance {
   //(item or customer changes from SAP, when that interface exists)
   @Column({ default: 1 })
   revision: number;
+
+  //the manager who handed the equipment over at the warehouse (POST /issuances/:id/self-pickup/report). null for every
+  //courier delivery. no foreign key, like delivery_tasks.assigned_by: the relation only loads the display name for the board
+  @Column({ nullable: true })
+  delivered_by_user_id: number;
+
+  @ManyToOne(() => User, { createForeignKeyConstraints: false })
+  @JoinColumn({ name: 'delivered_by_user_id' })
+  delivered_by: User;
 
   @Column({ type: 'timestamptz', nullable: true })
   deleted_at: Date;

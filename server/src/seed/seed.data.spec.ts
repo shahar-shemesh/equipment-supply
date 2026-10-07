@@ -79,3 +79,20 @@ describe('buildBulkIssuances', () => {
     }
   });
 });
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+describe('buildIssuances', () => {
+  //the same rule as the generated set. the self pickup row used to keep the courier of the assigned pattern it
+  //overrides, and the seed loop wrote a done task for it with an attempt whose outcome was 'self_pickup', a value
+  //AttemptOutcome does not have
+  it('a courier only where the seed loop has a task to create, the self pickup row included', () => {
+    const rows = buildIssuances();
+    const names = couriers.map((c) => c.name);
+    expect(rows.some((r) => r.status === IssuanceStatus.self_pickup)).toBe(true);
+    for (const r of rows) {
+      if (taskStatuses.includes(r.status)) expect(names).toContain(r.courier);
+      else expect(r.courier).toBeNull();
+    }
+  });
+});

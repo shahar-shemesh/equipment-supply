@@ -3,14 +3,18 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository } from 'typeorm';
 
 import { AuditAction, AuditEntityType, IssuanceSortKey, IssuanceStatus, Priority, TaskStatus } from '../../../shared/@core';
-import { Issuance, DeliveryTask, Courier } from '../entities';
+import { Issuance, DeliveryTask, DeliveryAttempt, Courier } from '../entities';
 import { AuditService } from '../audit/audit.service';
 import { changesBetween, snapshot } from '../audit/audit.diff';
+import { handedOver, outcomeOf, validateItemAnswers, validateRecipient, validateSignature } from '../delivery/attempt.validation';
 import { assertCanDo, editableStatuses } from './issuance.rules';
 
 //the courier on the open task, or on the last closed one, the same pick as withCurrentTask below. a correlated subselect
-//instead of a join: an issuance has several tasks over time and a join would multiply the rows under offset / limit
-const COURIER_NAME_SQL = `(SELECT c.name FROM delivery_tasks t JOIN couriers c ON c.id = t.courier_id WHERE t.issuance_id = i.id AND t.status != '${TaskStatus.cancelled}' ORDER BY (t.status = '${TaskStatus.pending}') DESC, t.id DESC LIMIT 1)`;
+//instead of a join: an issuance has several tasks over time and a join would multiply the rows under offset / limit.
+//a self pickup issuance shows nobody (its courier side ended, the handover did not happen yet), and once the manager
+//handed over at the warehouse that task has no courier (LEFT JOIN gives null) and the manager's name takes the place.
+//pagination.e2e.spec holds a copy of this expression, change both
+export const COURIER_NAME_SQL = `CASE WHEN i.status = '${IssuanceStatus.self_pickup}' THEN NULL ELSE COALESCE((SELECT c.name FROM delivery_tasks t LEFT JOIN couriers c ON c.id = t.courier_id WHERE t.issuance_id = i.id AND t.status != '${TaskStatus.cancelled}' ORDER BY (t.status = '${TaskStatus.pending}') DESC, t.id DESC LIMIT 1), (SELECT u.display_name FROM users u WHERE u.id = i.delivered_by_user_id)) END`;
 
 //the enums sort in the order the manager thinks in (open work first), not in the alphabet of their values
 const STATUS_RANK_SQL = `CASE i.status WHEN '${IssuanceStatus.unassigned}' THEN 0 WHEN '${IssuanceStatus.assigned}' THEN 1 WHEN '${IssuanceStatus.partially_delivered}' THEN 2 WHEN '${IssuanceStatus.not_delivered}' THEN 3 WHEN '${IssuanceStatus.delivered}' THEN 4 WHEN '${IssuanceStatus.self_pickup}' THEN 5 ELSE 6 END`;
@@ -27,13 +31,18 @@ const SORT_COLUMNS: Record<IssuanceSortKey, string> = {
   status: 'status_rank',
 };
 
-//the open task, or the last closed one when there is no open task. the board shows its courier.
+//the open task, or the last closed one when there is no open task. the board shows its courier, or the manager who
+//handed over at the warehouse when that task has none. a self pickup issuance has no current task and no name at all:
+//the courier side ended and the handover is still ahead, the same pick as COURIER_NAME_SQL above.
+//the delivered_by relation is a users row (password hash included), only its display name leaves the server.
 //items are sorted here and not in the query: an ORDER BY on a joined column breaks typeorm's skip/take (it paginates distinct rows, not distinct issuances)
 export function withCurrentTask(issuance: Issuance) {
+  const { delivered_by, ...rest } = issuance;
+  const waiting = issuance.status === IssuanceStatus.self_pickup;
   const tasks = (issuance.tasks || []).filter((t) => t.status !== TaskStatus.cancelled);
-  const current = tasks.find((t) => t.status === TaskStatus.pending) || tasks.sort((a, b) => b.id - a.id)[0] || null;
+  const current = waiting ? null : tasks.find((t) => t.status === TaskStatus.pending) || tasks.sort((a, b) => b.id - a.id)[0] || null;
   const items = (issuance.items || []).sort((a, b) => a.line_no - b.line_no);
-  return { ...issuance, items, current_task: current };
+  return { ...rest, items, current_task: current, delivered_by_name: waiting ? null : delivered_by?.display_name ?? null };
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/
@@ -128,7 +137,7 @@ export class IssuancesService {
     const ids = (await qb.offset((page - 1) * pageSize).limit(pageSize).getRawMany()).map((r) => +r.id);
     if (!ids.length) return { rows: [], total, page, page_size: pageSize };
 
-    const entities = await this.issuances.find({ where: { id: In(ids) }, relations: { items: true, tasks: { courier: true } } });
+    const entities = await this.issuances.find({ where: { id: In(ids) }, relations: { items: true, tasks: { courier: true }, delivered_by: true } });
     //find() has its own order, the id list is the order of the page
     const byId = new Map(entities.map((e) => [e.id, e]));
     // console.log('issuances.list', { page, pageSize, total, sortKey, dir });
@@ -140,11 +149,58 @@ export class IssuancesService {
   async findOne(id: number) {
     const issuance = await this.issuances.findOne({
       where: { id },
-      relations: { items: true, tasks: { courier: true, attempts: { items: true } } },
+      relations: { items: true, tasks: { courier: true, attempts: { items: true } }, delivered_by: true },
       order: { items: { line_no: 'ASC' }, tasks: { id: 'ASC' } },
     });
     if (!issuance) throw new NotFoundException(`issuance ${id} not found`);
     return withCurrentTask(issuance);
+  }
+
+  /*──────────────────────────────────────────────────────────────────────────*/
+
+  // POST /api/issuances/:id/self-pickup/report  (IAttemptPayload without the offline fields)
+  //the warehouse manager hands the equipment over at the warehouse: the courier's report payload, checked by the same
+  //validators, stored as an attempt on a task that never had a courier, and the outcome mirrored on the issuance exactly
+  //as a courier report does. self_pickup stays true, the manager from the token is recorded as the one who delivered.
+  //online only, so no operation id, no revision check and no replay: a second report finds the issuance delivered / not
+  //delivered and gets the 409 of the transition table. validation first, outside the transaction, like delivery.service
+  async reportSelfPickup(id: number, body: any, user: any) {
+    const issuance = await this.issuances.findOne({ where: { id }, relations: { items: true }, order: { items: { line_no: 'ASC' } } });
+    if (!issuance) throw new NotFoundException(`issuance ${id} not found`);
+
+    const answers = validateItemAnswers(issuance.items, body?.items);
+    const outcome = outcomeOf(answers);
+    //nothing handed over: no one received, recipient and signature are null, same rule as the courier's report
+    const recipient = validateRecipient(body, issuance, handedOver(answers));
+    const signature = validateSignature(body?.signature_png, handedOver(answers));
+
+    await this.issuances.manager.transaction(async (em) => {
+      const locked = await lockIssuance(em, id);
+      if (!locked) throw new NotFoundException(`issuance ${id} not found`);
+      assertCanDo('self_pickup_report', locked);
+
+      //the task is born closed: the handover is the delivery, there was never anything to drive. courier_id null keeps
+      //it off every courier board (delivery.service filters by courier_id)
+      const task = await em.save(em.create(DeliveryTask, { issuance_id: id, courier_id: null, status: TaskStatus.done, closed_at: new Date(), scheduled_date: locked.delivery_date || null, assigned_by: user?.sub ?? null }));
+      const attempt = em.create(DeliveryAttempt, {
+        task_id: task.id,
+        outcome,
+        recipient_type: recipient?.type ?? null,
+        recipient_name: recipient?.name ?? null,
+        recipient_id_number: recipient?.id_number ?? null,
+        recipient_phone: recipient?.phone ?? null,
+        signature_png: signature,
+        items: answers,
+      });
+      await em.save(attempt);
+
+      //em.update and not save: the locked entity has no relations loaded and a save would null what it does not know
+      await em.update(Issuance, id, { status: outcome as any, revision: locked.revision + 1, delivered_by_user_id: user.sub });
+      await this.audit.record(em, { actor: user, action: AuditAction.issuance_self_pickup_report, entity_type: AuditEntityType.issuance, entity_id: id, issuance_id: id, details: { task_id: task.id, attempt_id: attempt.id, outcome, items_delivered: answers.filter((a) => a.delivered).length, items_total: answers.length, revision: locked.revision + 1 } });
+      this.logger.log(`issuance ${locked.sap_number} handed over at the warehouse (${outcome}) by user ${user?.sub}, task ${task.id}`);
+    });
+
+    return this.findOne(id);
   }
 
   /*──────────────────────────────────────────────────────────────────────────*/
@@ -181,6 +237,8 @@ export class IssuancesService {
         issuance.self_pickup = true;
         issuance.status = IssuanceStatus.self_pickup;
         issuance.revision += 1;
+        //a handover that collected nothing can come back here: nobody delivered yet, so nobody is recorded
+        issuance.delivered_by_user_id = null;
         await cancelOpenTasks(em, id);
         this.logger.log(`issuance ${issuance.sap_number} moved to self pickup by user ${user?.sub}`);
       }
@@ -270,6 +328,9 @@ export class IssuancesService {
 
         issuance.status = IssuanceStatus.assigned;
         issuance.self_pickup = false;
+        //a courier takes over from a handover that collected nothing: the manager's record stays in the task history,
+        //not on the issuance, so a courier delivery is never attributed to the manager
+        issuance.delivered_by_user_id = null;
         issuance.revision += 1; //a report written against the old task is stale now, whoever the new courier is
         if (scheduledDate) issuance.delivery_date = scheduledDate;
         await em.save(issuance);

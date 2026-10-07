@@ -137,7 +137,8 @@ export function IssuancesTable({ rows, total, page, loading, selected, onSelect,
     { field: "customer", headerName: t(columnKeys.customer), flex: 1, minWidth: 120, cellClassName: "col-wrap", valueGetter: (_, row) => row.customer_name },
     { field: "destination", headerName: t(columnKeys.destination), flex: 1.2, minWidth: 140, cellClassName: "col-wrap", valueGetter: (_, row) => fullAddress(row) },
     { field: "city", headerName: t(columnKeys.city), width: 105, valueGetter: (_, row) => row.address_city },
-    { field: "courier", headerName: t(columnKeys.courier), width: 140, renderCell: (p) => p.row.current_task?.courier?.name || <span className="muted">{t("detail_no_courier")}</span> },
+    //the manager who handed a self pickup over at the warehouse stands where the courier would be
+    { field: "courier", headerName: t(columnKeys.courier), width: 140, renderCell: (p) => p.row.current_task?.courier?.name || p.row.delivered_by_name || <span className="muted">{t("detail_no_courier")}</span> },
     { field: "priority", headerName: t(columnKeys.priority), width: 90, renderCell: (p) => <PriorityBadge priority={p.row.priority} /> },
     { field: "status", headerName: t(columnKeys.status), width: 145, renderCell: (p) => <StatusBadge status={p.row.status} managerView /> },
     //the kebab. not a sort key on the server, so no header click either

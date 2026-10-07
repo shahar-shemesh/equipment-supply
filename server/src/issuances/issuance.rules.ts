@@ -2,19 +2,22 @@ import { ConflictException } from '@nestjs/common';
 
 import { IssuanceStatus } from '../../../shared/@core';
 
-export type IssuanceAction = 'assign' | 'self_pickup' | 'delete' | 'edit';
+export type IssuanceAction = 'assign' | 'self_pickup' | 'delete' | 'edit' | 'self_pickup_report';
 
 //which statuses each manager action may start from. anything not listed gets a 409.
 //
 //partially_delivered is in no row on purpose: nobody decided yet what happens with the lines that were already delivered.
 //a new task with the remaining lines only? the courier sees all lines with the delivered ones marked? back to SAP for a new
 //document? until that is answered a partially delivered issuance is frozen and the manager gets the 409 message.
-//delivered is closed for good, deleted too. self_pickup can still be assigned (manager changed their mind) or deleted
+//delivered is closed for good, deleted too. self_pickup can still be assigned (manager changed their mind) or deleted,
+//and it is the only status the handover report (the manager hands over at the warehouse) may start from: the report
+//sets the status from its outcome, so a second one finds delivered / not_delivered / partially_delivered and gets the 409
 const allowedFrom: Record<IssuanceAction, IssuanceStatus[]> = {
   assign: [IssuanceStatus.unassigned, IssuanceStatus.assigned, IssuanceStatus.not_delivered, IssuanceStatus.self_pickup],
   self_pickup: [IssuanceStatus.unassigned, IssuanceStatus.assigned, IssuanceStatus.not_delivered],
   delete: [IssuanceStatus.unassigned, IssuanceStatus.assigned, IssuanceStatus.not_delivered, IssuanceStatus.self_pickup],
   edit: [IssuanceStatus.unassigned, IssuanceStatus.assigned, IssuanceStatus.not_delivered, IssuanceStatus.self_pickup],
+  self_pickup_report: [IssuanceStatus.self_pickup],
 };
 
 //priority / date / notes may change on these. mark-urgent on the board uses it to skip the closed rows

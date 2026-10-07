@@ -94,6 +94,10 @@ export const he = {
     delete_done: "ההנפקה נמחקה בהצלחה",
     back_to_board: "חזרה ללוח ההנפקות",
     self_pickup_done: "ההנפקה הועברה לאיסוף עצמי",
+    //the handover at the warehouse: the report form of the courier, sent by the manager
+    self_pickup_report: "דיווח מסירה באיסוף עצמי",
+    self_pickup_report_title: "מסירה באיסוף עצמי - הנפקה {{number}}",
+    self_pickup_report_done: "המסירה נרשמה בהצלחה",
 
     // items
     item_name: "שם פריט",

@@ -42,6 +42,12 @@ export class IssuancesController {
     return this.svc.setPriority((body?.ids || []).map(Number), Priority.urgent, user);
   }
 
+  //the warehouse manager hands a self pickup issuance over: the courier's report payload, the manager from the token
+  @Post(':id/self-pickup/report')
+  reportSelfPickup(@Param('id') id: string, @Body() body: any, @CurrentUser() user: any) {
+    return this.svc.reportSelfPickup(+id, body, user);
+  }
+
   @Delete(':id')
   remove(@Param('id') id: string, @Body() body: any, @CurrentUser() user: any) {
     return this.svc.softDelete(+id, body?.reason, user);

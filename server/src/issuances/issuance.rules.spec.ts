@@ -46,6 +46,14 @@ describe('issuance transitions', () => {
         expect(canDo('self_pickup', IssuanceStatus.self_pickup)).toBe(false);
     });
 
+    it('the handover report starts from self pickup only, every other status is refused', () => {
+        expect(canDo('self_pickup_report', IssuanceStatus.self_pickup)).toBe(true);
+        for (const status of Object.values(IssuanceStatus).filter((s) => s !== IssuanceStatus.self_pickup)) {
+            expect(canDo('self_pickup_report', status)).toBe(false);
+        }
+        expect(() => assertCanDo('self_pickup_report', { sap_number: sap, status: IssuanceStatus.delivered })).toThrow(/delivered, self_pickup_report is not allowed/);
+    });
+
     it('the 409 message names the issuance, the status and the action', () => {
         let message = '';
         try {

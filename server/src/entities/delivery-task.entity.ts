@@ -23,7 +23,9 @@ export class DeliveryTask {
   @JoinColumn({ name: 'courier_id' })
   courier: Courier;
 
-  @Column()
+  //null for a self pickup handover: the manager closed it at the warehouse, no courier ever had it, so the courier
+  //board (which filters by courier_id) never lists it
+  @Column({ nullable: true })
   courier_id: number;
 
   @Column({ type: 'varchar', default: TaskStatus.pending })

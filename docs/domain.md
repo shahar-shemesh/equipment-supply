@@ -8,7 +8,7 @@ The spec and the designs use "issuance" (הנפקה) for several different thing
 
 - **Issuance** (`issuances`): the SAP document. Who the customer is, where it goes, the priority. Exists whether or not anyone was sent to deliver it. Its status mirrors the latest delivery outcome. Its `revision` is the concurrency token of an offline delivery report, see [What invalidates a report](offline-sync.md#what-invalidates-a-report).
 - **Issuance item** (`issuance_items`): one product line of the document, with catalog number, station number and serial. The courier answers delivered / not delivered per line, which is where partial delivery comes from.
-- **Delivery task** (`delivery_tasks`): "go deliver issuance X", one issuance handed to one courier for a date. This is what the courier's board lists. Reassigning cancels the old task and creates a new one, so the history of who had it stays.
+- **Delivery task** (`delivery_tasks`): "go deliver issuance X", one issuance handed to one courier for a date. This is what the courier's board lists. Reassigning cancels the old task and creates a new one, so the history of who had it stays. A self pickup handover writes a task with no courier (`courier_id` null, born done): the manager handed over at the warehouse and the attempt needs a task to hang off; no courier board ever lists it.
 - **Courier** (`couriers`): whoever drives the equipment. Separate from `users`: a courier exists before anyone gives them a login (the sample data has two external companies without one).
 - **Delivery attempt** (`delivery_attempts` + `delivery_attempt_items`): what the courier reported at the door: a result and reason per item, and who received plus the signature when at least one item was handed over. For a `not_delivered` attempt the four recipient columns and the signature are null: no one received and no one signed, so the screen never asked. Today one attempt closes a task; the table is ready for several attempts per task if "try again tomorrow" becomes a rule. `reported_at` is the server receipt time; `client_reported_at` is the device clock when the courier tapped send, kept separately because it is untrusted and can be hours earlier after an outage.
 - **Delivery operation** (`delivery_operations`): the receipt of a report sent with an operation id: the account, the task, the attempt it created, a hash of the validated payload and the exact result body. The same id from the same account is answered with the stored result instead of a second attempt. Only successful reports get a row, and the row goes in the same transaction as the attempt.
@@ -23,13 +23,15 @@ Terminology in the code follows the designers, not the original spec: issuance (
 
 **Status transitions.** `server/src/issuances/issuance.rules.ts` says from which status each manager action is allowed. Anything else is a 409 that names the issuance, its status and the action:
 
-| From | assign | self pickup | delete | edit (priority, date, notes) |
-| --- | --- | --- | --- | --- |
-| unassigned, assigned, not delivered | yes | yes | yes | yes |
-| self pickup | yes | no | yes | yes |
-| delivered | no | no | no | no |
-| partially delivered | no | no | no | no |
-| deleted | no | no | no | no |
+| From | assign | self pickup | delete | edit (priority, date, notes) | self pickup report (the handover) |
+| --- | --- | --- | --- | --- | --- |
+| unassigned, assigned, not delivered | yes | yes | yes | yes | no |
+| self pickup | yes | no | yes | yes | yes |
+| delivered | no | no | no | no | no |
+| partially delivered | no | no | no | no | no |
+| deleted | no | no | no | no | no |
+
+**Self pickup handover.** A `self_pickup` issuance shows no courier: its open task was cancelled when it moved there, and whatever closed task it still has is history, not current (`current_task` is null, the courier sort key too). The warehouse manager completes it with `POST /issuances/:id/self-pickup/report`, the courier's report body checked by the same validators. Under the issuance lock the service writes a done task with no courier (`courier_id` null, `assigned_by` the manager; the courier board filters by `courier_id`, so no courier ever sees it), the attempt with its item answers, recipient and signature, then the issuance: the status is the outcome of the answers exactly as after a courier report, `self_pickup` stays true, `revision` moves, and `delivered_by_user_id` records the manager from the token (never from the body). The board and the detail show that manager's display name where the courier would be. A manager has no `couriers` row: managers never appear in the assign dialog or the couriers page. The row allows the report from `self_pickup` only, so a second report meets the status the first one set and gets the 409. A courier assignment and a second move to self pickup clear `delivered_by_user_id`: the record names the manager only while the handover is the last delivery of the issuance; the handover task itself stays in the task history.
 
 Bulk assignment is all or nothing: one closed issuance in the selection fails the whole batch and nothing is written. Mark urgent skips closed rows and reports how many changed.
 
@@ -46,6 +48,7 @@ Bulk assignment is all or nothing: one closed issuance in the selection fails th
 | `issuance.assign` | issuance | `courier_id`, `task_id`, `scheduled_date`, `from_status`; one `batch_id` per request |
 | `issuance.edit` | issuance | `changes` over `priority`, `delivery_date`, `notes`, each as `{ from, to }` |
 | `issuance.self_pickup` | issuance | `from_status`, plus `changes` when field edits came along |
+| `issuance.self_pickup_report` | issuance | `task_id`, `attempt_id`, `outcome`, `items_delivered`, `items_total`, `revision` (the issuance revision after the handover); the actor is the manager who handed over |
 | `issuance.mark_urgent` | issuance | `from_priority`; one `batch_id` per request |
 | `issuance.delete` | issuance | `reason`, `from_status` |
 | `courier.create`, `courier.reactivate` | courier | `name`, `employee_id` |
@@ -73,9 +76,10 @@ Migrations arrived with the offline work and stay minimal: one hand written clas
 
 Run `migration:run` (or `migration:run:prod`) before starting a new server build everywhere except a LOCAL machine with `DB_SYNCHRONIZE=true`, where `synchronize` adds the same objects on start and the migration becomes a no-op. The application never runs migrations by itself (no `migrationsRun`): a schema change is a deliberate step, not a side effect of a restart. TypeORM keeps the applied list in a `migrations` table it creates on the first run.
 
-Four migrations so far, all guarded by `IF NOT EXISTS` and reversed in `down`, all adding objects only (nothing is wiped, the tables of the previous version are assumed to exist), all with column types and constraint names that match what `synchronize` generates from the entities, so a LOCAL database that ran either path shows no diff to the other:
+Five migrations so far, all guarded by `IF NOT EXISTS` and reversed in `down`, all adding objects only (nothing is wiped, the tables of the previous version are assumed to exist), all with column types and constraint names that match what `synchronize` generates from the entities, so a LOCAL database that ran either path shows no diff to the other:
 
 - `OfflineSync1790600000000`: `issuances.revision`, `delivery_attempts.client_reported_at` and the `delivery_operations` table with its unique index.
 - `ConflictEvidence1790800000000`: the `delivery_conflicts` table with its unique index on (`user_id`, `operation_id`) and the foreign key to `delivery_tasks`. The constraint names come from TypeORM's own naming strategy inside the migration.
 - `NoRecipientWithoutDelivery1790900000000`: `delivery_attempts.recipient_type`, `delivery_conflicts.recipient_type` and `delivery_conflicts.signature_png` become nullable, for a report whose every line is "not delivered" (no one received, no one signed). `DROP NOT NULL` is a no-op where `synchronize` already did it. The revert puts the constraints back and is refused by PostgreSQL while such rows exist.
 - `AuditLog1791000000000`: the `audit_log` table with its four indexes on (`issuance_id`, `at`), (`actor_user_id`, `at`), (`entity_type`, `entity_id`, `at`) and (`at`). No foreign keys by design; the primary key and the index names come from TypeORM's naming strategy inside the migration, like `ConflictEvidence`.
+- `SelfPickupHandover1791100000000`: `issuances.delivered_by_user_id` (nullable integer, no foreign key, like `delivery_tasks.assigned_by`) and `delivery_tasks.courier_id` becomes nullable for the handover task. The revert puts `NOT NULL` back and is refused by PostgreSQL while handover tasks exist.
