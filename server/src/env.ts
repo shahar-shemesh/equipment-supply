@@ -41,6 +41,18 @@ export function destructiveSeedAllowed() {
 
 /*──────────────────────────────────────────────────────────────────────────*/
 
+//SEED_BULK = generated issuances the seed adds on top of the 30 handcrafted ones. unset or blank is 2000, so a plain
+//npm run seed gives the board enough pages to page through; 0 keeps the handcrafted set only. anything else throws:
+//a typo must not quietly seed a different set than the one asked for (+'-5' and +' ' both pass as numbers)
+export function seedBulkCount() {
+  const raw = (process.env.SEED_BULK ?? '').trim();
+  if (raw === '') return 2000;
+  if (!/^\d+$/.test(raw)) throw new Error(`SEED_BULK must be a whole number of generated issuances, got "${process.env.SEED_BULK}"`);
+  return +raw;
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
 //called once from main.ts before anything listens. throws on the combinations that must never run, warns on the ones
 //that are allowed but worth noticing in the log
 export function assertSafeConfig(logger: { log: (m: string) => void; warn: (m: string) => void }) {

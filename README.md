@@ -25,7 +25,7 @@ What runs today:
 - Courier board with tabs and search, grouped cards for the same address, the delivery report (per item delivered / not delivered with a reason; recipient and signature only when at least one item was delivered), lookup by issuance number.
 - Courier work without a network: the task list is downloaded to the device, drafts and signed reports live in IndexedDB, a sync worker sends queued reports with an operation id the server treats as idempotent, a service worker serves the built app offline. See [Offline courier work](docs/offline-sync.md).
 - NestJS API with role based access, server side validation of the delivery report, status transition rules, row locking for concurrent requests, idempotent delivery reports, an append-only audit log of every state change readable through `GET /api/audit` (see [Domain model and server rules](docs/domain.md#rules-enforced-on-the-server)).
-- PostgreSQL schema with four migrations, a seed with 30 sample issuances, 192 tests (120 server, 72 client).
+- PostgreSQL schema with four migrations, a seed with 30 handcrafted issuances plus 2000 generated ones, 218 tests (146 server, 72 client).
 - Responsive layout for phone, tablet and desktop.
 
 What does not exist: the SAP interface, history and analytics screens, PDF / SMS / email confirmations, the courier Excel import, production authentication, synchronization while the app is closed (no Background Sync), raster and iOS home screen icons, any way for a manager to apply, merge or reassign a rejected report (the manager can read it and mark it reviewed, see [Unresolved reports](docs/offline-sync.md#unresolved-reports)). Details under [Sample data and what is missing](#sample-data-and-what-is-missing).
@@ -149,7 +149,7 @@ cd server && npm run test:unit   # no database needed
 cd client && npm test
 ```
 
-Server: 120 tests in 13 suites (jest; 66 unit, 54 e2e). The unit specs next to the code cover the payload validation, the transition table, the courier form validation, the issuance lookup, `delivery/operation.ts`, the audit diff, the audit query validation and the audit row scrub without a database. `src/e2e/` boots the real application with supertest against `equipment_supply_test` (created on first run): the delivery report and its rules, the offline sync route with operation ids, the evidence of rejected reports and its manager review, courier management, the audit log (every recorded action, what writes nothing, the manager's read).
+Server: 146 tests in 16 suites (jest; 76 unit, 70 e2e). The unit specs next to the code cover the payload validation, the transition table, the courier form validation, the issuance lookup, `delivery/operation.ts`, the audit diff, the audit query validation, the audit row scrub, the generated seed rows and the `SEED_BULK` reader without a database. `src/e2e/` boots the real application with supertest against `equipment_supply_test` (created on first run): the delivery report and its rules, the offline sync route with operation ids, the evidence of rejected reports and its manager review, courier management, the audit log (every recorded action, what writes nothing, the manager's read), and the board paging walked page by page on the 2030 seeded issuances against SQL (totals, sorts, filters, the deleted rows, the tasks and attempts the seed writes).
 
 Client: 72 tests in 7 files (vitest on jsdom with `fake-indexeddb`, see `client/src/test/setup.ts`), no browser. They cover the offline data layer (`db`, `store`, `refresh`, `sync`), the service worker update hold (`sw`) and two components (`FindNumberDialog`, `QrCamera`).
 
@@ -157,7 +157,7 @@ What each test checks is written in the spec files; their names are the descript
 
 ## Sample data and what is missing
 
-- Every issuance, courier and customer comes from `server/src/seed/seed.data.ts`. There is no SAP: the interface is not defined and none was invented. The `source` column on an issuance (`sample` today) is the only touch point.
+- Every issuance, courier and customer comes from `server/src/seed/seed.data.ts`: 30 handcrafted issuances (the names and addresses of the Figma screens) plus 2000 generated ones from a seeded PRNG, the same rows on every run (the dates are relative to the seed day). `SEED_BULK` in `server/.env` sets the generated count, `SEED_BULK=0` seeds the 30 only; a value that is not a whole number is refused. There is no SAP: the interface is not defined and none was invented. The `source` column on an issuance (`sample` today) is the only touch point.
 - QR scanning uses qr-scanner in both boards. The QR must contain the SAP issuance number as digits only (leading zeros are kept), not a URL or JSON. The courier searches the device first; the manager opens the exact matching issuance. Camera access needs HTTPS or localhost and browser permission. Manual entry remains available. The scanner worker is bundled and precached with the built PWA; no external decoder service is used.
 - Couriers: add, edit and delete follow the `ניהול שליחים` screens. The Excel import (spec 2.7.2) has no design. Delete is a soft `active=false` (the delivery tasks point at the row) and is refused while the courier has open deliveries.
 - Reports and the KPI dashboard: placeholder page. The diagram has a question mark on the KPI definition.

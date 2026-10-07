@@ -131,5 +131,160 @@ export function buildIssuances() {
   return rows;
 }
 
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//mulberry32, a 32 bit prng small enough to live here. the generated rows below have to be the same on every run and
+//every machine (the dates aside, they are relative to the seed day): the pagination spec compares api pages against
+//sql on the seeded set, and a board that changes under the developer between two seeds is useless for "page 134 looked wrong"
+function mulberry32(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+//pools for the generated set. nothing here is from the design, the names are just common ones so the board reads as hebrew
+const firstNames = ['אבי', 'אורי', 'איתי', 'אלון', 'אמיר', 'אסף', 'בועז', 'גיל', 'גלעד', 'דוד', 'דניאל', 'דרור', 'הדר', 'זיו', 'חן', 'טל', 'יאיר', 'יובל', 'יונתן', 'ינון', 'ירון', 'לירן', 'מאור', 'מתן', 'נדב', 'ניר', 'נעם', 'עומר', 'עידו', 'עמית', 'ערן', 'רועי', 'שי', 'תומר', 'נועה', 'שירה', 'מיכל', 'הילה', 'ליאת', 'מורן', 'ענת', 'תמר'];
+const surnames = ['כהן', 'לוי', 'מזרחי', 'פרץ', 'ביטון', 'אברהם', 'פרידמן', 'מלכה', 'אזולאי', 'דהן', 'חדד', 'גבאי', 'עמר', 'אוחיון', 'שפירא', 'ברק', 'סגל', 'רוזנברג', 'קליין', 'גולן', 'בן דוד', 'חיים', 'נחום', 'יוסף', 'שלום', 'ממן', 'אדרי', 'ברוך', 'זוהר', 'אלבז'];
+const cities = ['תל אביב', 'ירושלים', 'חיפה', 'ראשון לציון', 'פתח תקווה', 'אשדוד', 'נתניה', 'באר שבע', 'בני ברק', 'חולון', 'רמת גן', 'אשקלון', 'רחובות', 'בת ים', 'הרצליה', 'כפר סבא', 'חדרה', 'מודיעין', 'לוד', 'רמלה', 'רעננה', 'הוד השרון', 'קריית גת', 'אילת', 'נצרת'];
+const streets = ['הרצל', "ז'בוטינסקי", 'ויצמן', 'בן גוריון', 'רוטשילד', 'אלנבי', 'דיזנגוף', 'אבן גבירול', 'סוקולוב', 'ביאליק', 'אחד העם', 'הנשיא', 'הרב קוק', 'הפלמ"ח', 'ההגנה', 'בר אילן', 'ירושלים', 'יפו', 'הגליל', 'הנגב', 'הכרמל', 'השרון', 'הירדן', 'הארבעה', 'המלאכה', 'התעשייה', 'היצירה', 'המסגר', 'העצמאות', 'הבנים', 'השלום', 'המייסדים', 'ארלוזורוב', 'קפלן', 'בגין', 'רבין', 'שז"ר', 'ברנר', 'טשרניחובסקי', 'נורדאו'];
+const buildings = ['קומה 1', 'קומה 2', 'קומה 3', 'קומה 4', "בניין א'", "בניין ב'", 'מחסן', 'אגף צפוני', 'אגף דרומי', 'חדר 12', 'כניסה ב'];
+const bulkProducts = [
+  { product_name: 'מחשב נייד', catalog_number: 'LPT-1001', station_prefix: '11' },
+  { product_name: 'מחשב נייח', catalog_number: 'PKG-1102', station_prefix: '11' },
+  { product_name: 'מסך 27', catalog_number: 'MON-2710', station_prefix: '12' },
+  { product_name: 'מסך 24', catalog_number: 'MON-2410', station_prefix: '12' },
+  { product_name: 'מקלדת', catalog_number: 'PKG-2244', station_prefix: '46' },
+  { product_name: 'עכבר', catalog_number: 'PKG-2245', station_prefix: '46' },
+  { product_name: 'מדפסת', catalog_number: 'PRN-3300', station_prefix: '27' },
+  { product_name: 'סורק', catalog_number: 'SCN-3310', station_prefix: '27' },
+  { product_name: 'שרת', catalog_number: 'SRV-1001', station_prefix: '33' },
+  { product_name: 'מתג רשת', catalog_number: 'NET-4010', station_prefix: '34' },
+  { product_name: 'נתב', catalog_number: 'NET-4020', station_prefix: '34' },
+  { product_name: 'טלפון IP', catalog_number: 'TEL-5001', station_prefix: '51' },
+  { product_name: 'מצלמת רשת', catalog_number: 'CAM-5100', station_prefix: '51' },
+  { product_name: 'תחנת עגינה', catalog_number: 'DCK-1200', station_prefix: '11' },
+  { product_name: 'כונן גיבוי', catalog_number: 'BKP-6001', station_prefix: '33' },
+];
+const phonePrefixes = ['050', '052', '053', '054', '055', '058', '02', '03', '04', '08', '09'];
+const notePool = ['להתקשר לפני ההגעה', 'הכניסה מהחניון', 'למסור לשומר בכניסה', 'לא לפני 10:00', 'קומה ללא מעלית', 'איש קשר בשטח: מזכירות'];
+const deleteReasons = ['בוטל על ידי הלקוח', 'הונפק בטעות', 'כפילות של הנפקה אחרת', 'הציוד הוחזר למחסן'];
+
+//roughly the mix of a real week: most rows closed, a quarter waiting for a courier, a few deleted so the board has
+//something to hide. percent, summing to 100
+const statusWeights: [IssuanceStatus, number][] = [
+  [IssuanceStatus.unassigned, 25],
+  [IssuanceStatus.assigned, 15],
+  [IssuanceStatus.delivered, 42],
+  [IssuanceStatus.partially_delivered, 5],
+  [IssuanceStatus.not_delivered, 5],
+  [IssuanceStatus.self_pickup, 5],
+  [IssuanceStatus.deleted, 3],
+];
+
+const closedStatuses = [IssuanceStatus.delivered, IssuanceStatus.partially_delivered, IssuanceStatus.not_delivered];
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//count generated issuances on top of the 30 above, so the board has enough pages to break offset paging if it is broken.
+//the customer is drawn first and keeps the address of their office, a repeat is the same place getting another box,
+//which is what the courier board groups. the rows have the shape of buildIssuances() and go through the same loop
+//in seed.service, so the task / attempt rules per status exist once
+export function buildBulkIssuances(count: number) {
+  const rows: any[] = [];
+  const rand = mulberry32(20261007);
+  const int = (min: number, max: number) => min + Math.floor(rand() * (max - min + 1));
+  const pick = <T>(arr: T[]) => arr[Math.floor(rand() * arr.length)];
+  const today = new Date();
+  const dateAt = (days: number) => {
+    const d = new Date(today);
+    d.setDate(today.getDate() + days);
+    return d.toISOString().slice(0, 10);
+  };
+
+  //150 offices, each with the address it always receives at. drawn before the rows so a different count still gives the same pool
+  const customerPool = [];
+  for (let i = 0; i < 150; i++) {
+    customerPool.push({
+      name: `${pick(firstNames)} ${pick(surnames)}`,
+      id_number: String(int(100000000, 399999999)), //9 digits, not checked against the check digit, same as the couriers above
+      phone: `${pick(phonePrefixes)}-${int(1000000, 9999999)}`,
+      street: `${pick(streets)} ${int(1, 120)}`,
+      building: rand() < 0.7 ? pick(buildings) : null,
+      city: pick(cities),
+    });
+  }
+
+  for (let n = 0; n < count; n++) {
+    const customer = pick(customerPool);
+
+    let status = IssuanceStatus.unassigned;
+    let roll = rand() * 100;
+    for (const [s, weight] of statusWeights) {
+      if (roll < weight) {
+        status = s;
+        break;
+      }
+      roll -= weight;
+    }
+    const closed = closedStatuses.includes(status);
+
+    //a partial delivery needs a second line to leave behind, the seed loop delivers the first line and refuses the rest
+    const itemCount = status === IssuanceStatus.partially_delivered ? int(2, 4) : int(1, 4);
+    const items = [];
+    for (let k = 0; k < itemCount; k++) {
+      const p = pick(bulkProducts);
+      items.push({
+        line_no: k + 1,
+        product_name: p.product_name,
+        catalog_number: p.catalog_number,
+        station_number: `#${p.station_prefix}${int(10, 99)}`,
+        serial_number: `SN-${int(100000, 999999)}`,
+        quantity: int(1, 3),
+      });
+    }
+
+    const row: any = {
+      //13 wide blocks from 2000000: not a plain sequence, never two the same, never inside the 1234567..1234944 range of the rows above
+      sap_number: String(2000000 + n * 13 + int(0, 12)),
+      number_prefix: rand() < 0.15 ? null : pick(["ס'", "ד'", "כ'"]),
+      status,
+      priority: rand() < 0.15 ? Priority.urgent : Priority.normal,
+      customer_name: customer.name,
+      customer_id_number: customer.id_number,
+      customer_phone: customer.phone,
+      address_street: customer.street,
+      address_building: customer.building,
+      address_city: customer.city,
+      //a closed row was delivered (or not) on a past date, the others spread two months back and one month ahead
+      delivery_date: rand() < 0.05 ? null : dateAt(closed ? int(-60, -1) : int(-60, 30)),
+      self_pickup: status === IssuanceStatus.self_pickup,
+      notes: rand() < 0.1 ? pick(notePool) : null,
+      source: 'sample',
+      items,
+      //any of the 5 couriers, the two companies included, only where the seed loop has a task to create
+      courier: closed || status === IssuanceStatus.assigned ? pick(couriers).name : null,
+    };
+
+    //the shape softDelete in issuances.service leaves behind: status deleted, when and why, no task.
+    //the hour is drawn too, so two calls on the same day build the same Date and the determinism spec can compare them
+    if (status === IssuanceStatus.deleted) {
+      const deletedAt = new Date(today);
+      deletedAt.setDate(today.getDate() - int(0, 30));
+      deletedAt.setHours(int(8, 17), int(0, 59), 0, 0);
+      row.deleted_at = deletedAt;
+      row.delete_reason = pick(deleteReasons);
+    }
+
+    rows.push(row);
+  }
+
+  return rows;
+}
+
 //a real png (1x1 transparent). the seeded attempts need something in signature_png, the canvas will write real ones
 export const SAMPLE_SIGNATURE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';

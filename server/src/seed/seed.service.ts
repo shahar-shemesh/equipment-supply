@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
 
 import { AttemptOutcome, AuditAction, AuditEntityType, IssuanceStatus, NonDeliveryReason, RecipientType, TaskStatus } from '../../../shared/@core';
@@ -8,7 +7,7 @@ import { User, Courier, Issuance, DeliveryTask, DeliveryAttempt } from '../entit
 import { AuditService } from '../audit/audit.service';
 import { DEV_PASSWORD } from '../auth/auth.constants';
 import { destructiveSeedAllowed } from '../env';
-import { buildIssuances, couriers, users, SAMPLE_SIGNATURE } from './seed.data';
+import { buildBulkIssuances, buildIssuances, couriers, users, SAMPLE_SIGNATURE } from './seed.data';
 
 @Injectable()
 export class SeedService {
@@ -16,63 +15,64 @@ export class SeedService {
 
   constructor(
     private dataSource: DataSource,
-    @InjectRepository(User) private userRepo: Repository<User>,
-    @InjectRepository(Courier) private courierRepo: Repository<Courier>,
-    @InjectRepository(Issuance) private issuanceRepo: Repository<Issuance>,
-    @InjectRepository(DeliveryTask) private taskRepo: Repository<DeliveryTask>,
-    @InjectRepository(DeliveryAttempt) private attemptRepo: Repository<DeliveryAttempt>,
     private audit: AuditService,
   ) {}
 
   //wipes everything and inserts the sample set. npm run seed.
-  //seed.ts checks the same flag before booting, this one is for anyone who injects the service from somewhere else
-  async run() {
+  //seed.ts checks the same flag before booting, this one is for anyone who injects the service from somewhere else.
+  //bulk = generated issuances on top of the 30 handcrafted ones (seed.ts passes SEED_BULK). no options = the 30 only,
+  //which is what the e2e specs that read the seed back expect
+  async run(opts: { bulk?: number } = {}) {
     if (!destructiveSeedAllowed()) throw new Error('refusing to seed: needs ENVIRONMENT=LOCAL and ALLOW_DESTRUCTIVE_SEED=true');
     this.logger.log('===== seeding, all existing rows are dropped =====');
     await this.dataSource.query('TRUNCATE TABLE audit_log, delivery_conflicts, delivery_operations, delivery_attempt_items, delivery_attempts, delivery_tasks, issuance_items, issuances, couriers, users RESTART IDENTITY CASCADE');
 
     const hash = await bcrypt.hash(DEV_PASSWORD, 8); //cheap rounds, dev accounts
-
-    const savedCouriers: Record<string, Courier> = {};
-    for (const c of couriers) {
-      savedCouriers[c.name] = await this.courierRepo.save(this.courierRepo.create({ ...c, active: true }));
-    }
-
-    for (const u of users) {
-      const user = await this.userRepo.save(this.userRepo.create({ username: u.username, display_name: u.display_name, role: u.role, password_hash: hash }));
-      if (u.courier && savedCouriers[u.courier]) {
-        savedCouriers[u.courier].user_id = user.id;
-        await this.courierRepo.save(savedCouriers[u.courier]);
-      }
-    }
+    const handcrafted = buildIssuances();
+    const bulk = buildBulkIssuances(opts.bulk || 0);
 
     let issuances = 0;
     let tasks = 0;
     let attempts = 0;
-    for (const row of buildIssuances()) {
-      const { courier, ...data } = row;
-      //the cast keeps typeorm on the single entity overload, with a plain any it picks the array one
-      const issuance = await this.issuanceRepo.save(this.issuanceRepo.create(data as Partial<Issuance>));
-      issuances++;
+    //one transaction for the whole set. 2000 generated rows are some ten thousand inserts, autocommitted one by one that
+    //is a minute of fsyncs, in one commit a few seconds. a failure half way leaves the truncated tables, not half a set
+    await this.dataSource.transaction(async (em) => {
+      const savedCouriers: Record<string, Courier> = {};
+      for (const c of couriers) {
+        savedCouriers[c.name] = await em.save(Courier, { ...c, active: true });
+      }
 
-      if (!courier) continue;
-      const done = issuance.status !== IssuanceStatus.assigned;
-      const task = await this.taskRepo.save(
-        this.taskRepo.create({
+      for (const u of users) {
+        const user = await em.save(User, { username: u.username, display_name: u.display_name, role: u.role, password_hash: hash });
+        if (u.courier && savedCouriers[u.courier]) {
+          savedCouriers[u.courier].user_id = user.id;
+          await em.save(Courier, savedCouriers[u.courier]);
+        }
+      }
+
+      //handcrafted first so they keep the ids they always had, the generated ones after. one loop for both sets,
+      //the task / attempt rules per status exist here only
+      for (const row of [...handcrafted, ...bulk]) {
+        const { courier, ...data } = row;
+        //the cast keeps typeorm on the single entity overload, with a plain any it picks the array one
+        const issuance = await em.save(Issuance, data as Partial<Issuance>);
+        issuances++;
+
+        if (!courier) continue;
+        const done = issuance.status !== IssuanceStatus.assigned;
+        const task = await em.save(DeliveryTask, {
           issuance_id: issuance.id,
           courier_id: savedCouriers[courier].id,
           status: done ? TaskStatus.done : TaskStatus.pending,
           scheduled_date: issuance.delivery_date,
           closed_at: done ? new Date() : null,
-        }),
-      );
-      tasks++;
-      if (!done) continue;
+        });
+        tasks++;
+        if (!done) continue;
 
-      //a closed task gets the attempt that closed it, with answers matching the issuance status
-      const outcome = issuance.status as unknown as AttemptOutcome;
-      await this.attemptRepo.save(
-        this.attemptRepo.create({
+        //a closed task gets the attempt that closed it, with answers matching the issuance status
+        const outcome = issuance.status as unknown as AttemptOutcome;
+        await em.save(DeliveryAttempt, {
           task_id: task.id,
           outcome,
           recipient_type: RecipientType.customer,
@@ -90,15 +90,15 @@ export class SeedService {
               reason_details: delivered ? null : 'הלקוח לא היה בבית',
             };
           }),
-        }),
-      );
-      attempts++;
-    }
+        });
+        attempts++;
+      }
+    });
 
     //the first system actor: the truncate above wiped the log, this row signs the state everything after it builds on
     await this.audit.recordDetached({ action: AuditAction.system_seed, entity_type: AuditEntityType.system, details: { users: users.length, couriers: couriers.length, issuances } });
 
-    this.logger.log(`seeded ${users.length} users, ${couriers.length} couriers, ${issuances} issuances, ${tasks} tasks, ${attempts} attempts 🍺`);
+    this.logger.log(`seeded ${users.length} users, ${couriers.length} couriers, ${issuances} issuances (${handcrafted.length} handcrafted + ${bulk.length} generated), ${tasks} tasks, ${attempts} attempts 🍺`);
     this.logger.log(`dev accounts: ${users.map((u) => u.username).join(', ')} / password ${DEV_PASSWORD}`);
   }
 }
