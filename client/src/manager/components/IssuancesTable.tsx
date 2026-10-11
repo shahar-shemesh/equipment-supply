@@ -13,7 +13,7 @@ import UnfoldMoreIcon from "@mui/icons-material/UnfoldMore";
 import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
 
-import { IIssuance, ISortState, IssuanceSortKey, issuanceSortKeys } from "../../../../shared/@core";
+import { IIssuance, ISortState, IssuanceSortKey, IssuanceStatus, issuanceSortKeys } from "../../../../shared/@core";
 import { IssuanceAction, canDo } from "../../../../shared/@rules";
 import { statusKeys } from "../../../../shared/@utils";
 import { PriorityBadge, StatusBadge } from "../../components/StatusBadge";
@@ -64,6 +64,14 @@ const actionRules: Record<RowAction, IssuanceAction> = {
 //neither should happen from a checkbox. partially_delivered is frozen on the server and stays out of the selection
 export function canSelect(row: IIssuance) {
   return canDo("assign", row.status) && canDo("edit", row.status);
+}
+
+//the first line of the kebab for a status: nothing when every item works, "some are unavailable" when a few are refused,
+//"no actions" when the whole menu is grey (delivered, partially delivered, deleted)
+export function menuCaptionKey(status: IssuanceStatus) {
+  const refused = Object.values(actionRules).filter((action) => !canDo(action, status)).length;
+  if (!refused) return null;
+  return refused === Object.keys(actionRules).length ? "row_actions_all_blocked" : "row_actions_blocked";
 }
 
 function rowSelectable(p: GridRowParams<IIssuance>) {
@@ -144,18 +152,19 @@ export function IssuancesTable({ rows, total, page, loading, selected, onSelect,
   onOpenRef.current = onOpen;
 
   //every column flexes between a floor and a cap. the floor is the header (title + sort button + padding) or the widest
-  //value, whichever is wider, and the floors plus the checkbox and the kebab add up to 920px: what the grid gets at 1440,
-  //where the widgets column takes the rest. the badge columns are capped so a wide screen does not stretch them, the free
-  //text ones (customer, destination, courier, city) have no cap and take the surplus
+  //seeded value at the grid's 14px, whichever is wider, and the floors plus the checkbox and the kebab add up to 920px:
+  //at 1440 the grid gets 929 (the widgets column takes the rest), 927 inside its border with a 15px page scrollbar and
+  //925 with a 17px one, so 920 keeps a few pixels of slack either way. the badge columns are capped so a wide screen does
+  //not stretch them, the free text ones (customer, destination, courier, city) have no cap and take the surplus
   const columns = useMemo<GridColDef<IIssuance>[]>(() => [
-    { field: "number", headerName: t(columnKeys.number), flex: 1, minWidth: 148, maxWidth: 180, renderCell: (p) => <button type="button" className="link-button issuances-grid__number" onClick={() => onOpenRef.current(p.row)}>{displayNumber(p.row)}</button> },
-    { field: "customer", headerName: t(columnKeys.customer), flex: 1.2, minWidth: 100, cellClassName: "col-wrap", valueGetter: (_, row) => row.customer_name },
-    { field: "destination", headerName: t(columnKeys.destination), flex: 2, minWidth: 130, cellClassName: "col-wrap", valueGetter: (_, row) => fullAddress(row) },
-    { field: "city", headerName: t(columnKeys.city), flex: 0.9, minWidth: 96, cellClassName: "col-wrap", valueGetter: (_, row) => row.address_city },
+    { field: "number", headerName: t(columnKeys.number), flex: 1, minWidth: 132, maxWidth: 160, renderCell: (p) => <button type="button" className="link-button issuances-grid__number" onClick={() => onOpenRef.current(p.row)}>{displayNumber(p.row)}</button> },
+    { field: "customer", headerName: t(columnKeys.customer), flex: 1.2, minWidth: 94, cellClassName: "col-wrap", valueGetter: (_, row) => row.customer_name },
+    { field: "destination", headerName: t(columnKeys.destination), flex: 2, minWidth: 154, cellClassName: "col-wrap", valueGetter: (_, row) => fullAddress(row) },
+    { field: "city", headerName: t(columnKeys.city), flex: 0.9, minWidth: 90, cellClassName: "col-wrap", valueGetter: (_, row) => row.address_city },
     //the manager who handed a self pickup over at the warehouse stands where the courier would be
-    { field: "courier", headerName: t(columnKeys.courier), flex: 1, minWidth: 100, cellClassName: "col-wrap", renderCell: (p) => p.row.current_task?.courier?.name || p.row.delivered_by_name || <span className="muted">{t("detail_no_courier")}</span> },
-    { field: "priority", headerName: t(columnKeys.priority), flex: 0.7, minWidth: 104, maxWidth: 130, align: "center", headerAlign: "center", renderCell: (p) => <PriorityBadge priority={p.row.priority} /> },
-    { field: "status", headerName: t(columnKeys.status), flex: 1, minWidth: 142, maxWidth: 190, align: "center", headerAlign: "center", renderCell: (p) => <StatusBadge status={p.row.status} managerView /> },
+    { field: "courier", headerName: t(columnKeys.courier), flex: 1.1, minWidth: 124, cellClassName: "col-wrap", renderCell: (p) => p.row.current_task?.courier?.name || p.row.delivered_by_name || <span className="muted">{t("detail_no_courier")}</span> },
+    { field: "priority", headerName: t(columnKeys.priority), flex: 0.6, minWidth: 84, maxWidth: 110, align: "center", headerAlign: "center", renderCell: (p) => <PriorityBadge priority={p.row.priority} /> },
+    { field: "status", headerName: t(columnKeys.status), flex: 1, minWidth: 142, maxWidth: 180, align: "center", headerAlign: "center", renderCell: (p) => <StatusBadge status={p.row.status} managerView /> },
     //the kebab. not a sort key on the server, so no header click either. the button is the whole cell (col-tight)
     { field: "actions", headerName: "", width: 50, sortable: false, align: "center", headerAlign: "center", headerClassName: "col-tight", cellClassName: "col-tight", renderCell: (p) => <IconButton size="small" aria-label={t("row_actions")} onClick={(e) => setMenu({ anchor: e.currentTarget, row: p.row })}><MoreVertIcon /></IconButton> },
   ], [t]);
@@ -168,12 +177,12 @@ export function IssuancesTable({ rows, total, page, loading, selected, onSelect,
   }), [t]);
 
   //one menu for the grid rows and the cards, anchored to whichever kebab was tapped. an item the server would refuse
-  //for this row's status is disabled, not hidden, and a caption at the top says why the menu is short
+  //for this row's status is disabled, not hidden, and a caption at the top says why the menu is short (or all grey)
   const allowed = (action: RowAction) => !menu || canDo(actionRules[action], menu.row.status);
-  const blocked = !!menu && (Object.keys(actionRules) as RowAction[]).some((action) => !allowed(action));
+  const captionKey = menu ? menuCaptionKey(menu.row.status) : null;
   const actionsMenu = (
     <Menu open={!!menu} anchorEl={menu?.anchor} onClose={() => setMenu(null)}>
-      {blocked && <MenuItem disabled className="menu-item--caption">{t("row_actions_blocked", { status: t(statusKeys[menu.row.status]) })}</MenuItem>}
+      {captionKey && <MenuItem disabled className="menu-item--caption">{t(captionKey, { status: t(statusKeys[menu.row.status]) })}</MenuItem>}
       <MenuItem disabled={!allowed("change_date")} onClick={() => act("change_date")}><ListItemIcon><CalendarMonthIcon fontSize="small" /></ListItemIcon>{t("row_change_date")}</MenuItem>
       <MenuItem disabled={!allowed("self_pickup")} onClick={() => act("self_pickup")}><ListItemIcon><PersonIcon fontSize="small" /></ListItemIcon>{t("row_self_pickup")}</MenuItem>
       <MenuItem disabled={!allowed("mark_urgent")} onClick={() => act("mark_urgent")}><ListItemIcon><ErrorOutlineIcon fontSize="small" /></ListItemIcon>{t("mark_urgent")}</MenuItem>

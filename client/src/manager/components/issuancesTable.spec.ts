@@ -5,7 +5,7 @@ vi.mock("@mui/x-data-grid-premium", () => ({ DataGridPremium: () => null }));
 vi.mock("@mui/x-data-grid-premium/locales", () => ({ heIL: { components: { MuiDataGrid: { defaultProps: { localeText: {} } } } } }));
 
 import { IssuanceStatus } from "../../../../shared/@core";
-import { canSelect, selectionToIds, sortModelToState } from "./IssuancesTable";
+import { canSelect, menuCaptionKey, selectionToIds, sortModelToState } from "./IssuancesTable";
 
 //the two adapters between the grid's models and the board's state. the grid itself is not rendered here (jsdom has no
 //layout for it); the mapping is what the bulk actions and the list request depend on
@@ -35,6 +35,23 @@ describe("canSelect", () => {
     };
     for (const status of Object.values(IssuanceStatus)) {
       expect([status, canSelect({ status } as any)]).toEqual([status, expected[status]]);
+    }
+  });
+});
+
+describe("menuCaptionKey", () => {
+  it("says nothing on an open row, 'some' on self pickup, 'nothing' on a row the server has closed", () => {
+    const expected: Record<IssuanceStatus, string | null> = {
+      [IssuanceStatus.unassigned]: null,
+      [IssuanceStatus.assigned]: null,
+      [IssuanceStatus.not_delivered]: null,
+      [IssuanceStatus.self_pickup]: "row_actions_blocked", //only "move to self pickup" is refused
+      [IssuanceStatus.partially_delivered]: "row_actions_all_blocked",
+      [IssuanceStatus.delivered]: "row_actions_all_blocked",
+      [IssuanceStatus.deleted]: "row_actions_all_blocked",
+    };
+    for (const status of Object.values(IssuanceStatus)) {
+      expect([status, menuCaptionKey(status)]).toEqual([status, expected[status]]);
     }
   });
 });
