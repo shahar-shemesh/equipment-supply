@@ -12,6 +12,12 @@
         grid-template-columns: 1fr 400px;
     }
 
+    // the panel hidden (the "סגור פאנל" of the spec): the table takes the whole row at every width. qualified, the wide
+    // rule above has the same weight and sits first
+    &.board--no-side {
+        grid-template-columns: 1fr;
+    }
+
     @include bp.tablet {
         gap: 24px;
     }
@@ -36,6 +42,19 @@
             flex-direction: column;
             align-items: stretch;
             margin-bottom: 16px;
+        }
+    }
+
+    // find issuance and, while the panel is hidden, the button that brings it back
+    &__title-actions {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+
+        @include bp.phone {
+            flex-direction: column;
+            align-items: stretch;
         }
     }
 
@@ -521,6 +540,17 @@
     color: var(--color-danger) !important;
 }
 
+// the first line of the kebab when the status blocks some of its items. disabled so the menu skips it, but readable
+.menu-item--caption.MuiMenuItem-root.Mui-disabled {
+    opacity: 1;
+    color: var(--color-text-secondary);
+    font-size: 13px;
+    white-space: normal;
+    max-width: 280px;
+    border-bottom: 1px solid var(--color-border);
+    margin-bottom: 4px;
+}
+
 // the phone version of the board table, one card per row (IssuanceCard.tsx)
 .issuance-cards {
     display: flex;
@@ -665,6 +695,27 @@
 
     @include bp.phone {
         gap: 12px;
+    }
+
+    // the "הסתרת פאנל" line above the two boxes. on the tablet grid it spans both columns
+    &__bar {
+        display: flex;
+        justify-content: flex-end;
+
+        @include bp.tablet-up {
+            grid-column: 1 / -1;
+        }
+    }
+}
+
+// "לפי שם / לפי עומס" under a search field (SortToggle.tsx)
+.sort-toggle {
+    margin-top: 8px;
+
+    .MuiToggleButton-root {
+        padding: 2px 14px;
+        font: inherit;
+        font-size: 13px;
     }
 }
 

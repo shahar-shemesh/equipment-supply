@@ -21,7 +21,7 @@ Terminology in the code follows the designers, not the original spec: issuance (
 
 ## Rules enforced on the server
 
-**Status transitions.** `server/src/issuances/issuance.rules.ts` says from which status each manager action is allowed. Anything else is a 409 that names the issuance, its status and the action:
+**Status transitions.** `shared/@rules.ts` says from which status each manager action is allowed; `server/src/issuances/issuance.rules.ts` turns a refusal into the 409 and the manager board reads the same table to disable the button first (the kebab, the detail dialog and the selection checkbox). The 409 body is `{ statusCode: 409, message, code: 'status_not_allowed', sap_number, status, action }`: the message names the issuance, its status and the action in English, the fields next to it let the client say the same in Hebrew:
 
 | From | assign | self pickup | delete | edit (priority, date, notes) | self pickup report (the handover) |
 | --- | --- | --- | --- | --- | --- |

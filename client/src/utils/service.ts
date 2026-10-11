@@ -1,4 +1,8 @@
 import axios from "axios";
+import i18n from "i18next";
+
+import { statusKeys } from "../../../shared/@utils";
+import { actionKeys } from "../../../shared/@rules";
 
 export const TOKEN_KEY = "es_token";
 export const USER_KEY = "es_user";
@@ -42,8 +46,13 @@ export function del(path: string, body?: any) {
 
 /*──────────────────────────────────────────────────────────────────────────*/
 
-//nest puts validation messages in an array, everything else is a string
+//nest puts validation messages in an array, everything else is a string. the 409 of the transition table comes with its
+//parts (shared/@rules.ts) and is worded here in hebrew: which issuance, its status, the action it refused
 export function errorMessage(err: any) {
-  const m = err?.response?.data?.message;
+  const data = err?.response?.data;
+  if (data?.code === "status_not_allowed" && statusKeys[data.status] && actionKeys[data.action]) {
+    return i18n.t("conflict_status_not_allowed", { number: data.sap_number, status: i18n.t(statusKeys[data.status]), action: i18n.t(actionKeys[data.action]) });
+  }
+  const m = data?.message;
   return Array.isArray(m) ? m.join(", ") : m || err?.message || "שגיאה לא ידועה";
 }

@@ -2,22 +2,36 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Snackbar } from "@mui/material";
 import QrCodeScannerIcon from "@mui/icons-material/QrCodeScanner";
+import ViewSidebarIcon from "@mui/icons-material/ViewSidebar";
 
 import { IIssuance, ISortState } from "../../../../shared/@core";
 import { get, patch, post, errorMessage } from "../../utils/service";
 import { formatDateTime } from "../../utils/format";
 import { BoardFilters, initialFilters, toQuery } from "../components/BoardFilters";
-import { IssuancesTable, PAGE_SIZE, RowAction } from "../components/IssuancesTable";
+import { IssuancesTable, PAGE_SIZE, RowAction, canSelect } from "../components/IssuancesTable";
 import { SideWidgets } from "../components/SideWidgets";
 import { AssignCourierDialog } from "../components/AssignCourierDialog";
 import { IssuanceDetailDialog } from "../components/IssuanceDetailDialog";
 import { FindNumberDialog } from "../../components/FindNumberDialog";
+
+//the side panel's open / hidden choice outlives the page (spec 4.1 "סגור פאנל"). storage can be off in a private window,
+//then the choice lasts the session only
+const SIDE_PANEL_KEY = "es_board_side";
+
+function readSidePanel() {
+  try {
+    return localStorage.getItem(SIDE_PANEL_KEY) !== "hidden";
+  } catch {
+    return true;
+  }
+}
 
 //לוח ניהול הנפקות - the manager home. table + filters + the two side widgets + a bottom bar for bulk actions
 export default function IssuancesBoard() {
   const { t } = useTranslation();
 
   const [filters, setFilters] = useState<any>(initialFilters); //today's date on first open, the lists empty
+  const [sideOpen, setSideOpen] = useState(readSidePanel);
   const [sort, setSort] = useState<ISortState>(null); //null = the server's default order, urgent first then by date
   const [page, setPage] = useState(1);
   const [data, setData] = useState<{ rows: IIssuance[]; total: number }>({ rows: [], total: 0 });
@@ -45,8 +59,9 @@ export default function IssuancesBoard() {
       //page that has any. the grid does this on its own on desktop, the cards need it here
       const lastPage = Math.max(Math.ceil(res.total / PAGE_SIZE), 1);
       if (page > lastPage) setPage(lastPage);
-      //rows that left the page (filter change, status change) leave the selection too
-      setSelected((ids) => ids.filter((id) => res.rows.some((r) => r.id === id)));
+      //rows that left the page (filter change, status change) leave the selection too, and so does a row whose new
+      //status the bar actions may not touch any more (a courier delivered part of it meanwhile)
+      setSelected((ids) => ids.filter((id) => res.rows.some((r) => r.id === id && canSelect(r))));
     } catch (e) {
       setToast({ text: errorMessage(e), severity: "error" });
     } finally {
@@ -68,7 +83,24 @@ export default function IssuancesBoard() {
     setPage(1);
   }
 
+  //only the panel moves: filters, page, sort and the selection are state of their own and stay where they are
+  function toggleSidePanel(open: boolean) {
+    setSideOpen(open);
+    try {
+      localStorage.setItem(SIDE_PANEL_KEY, open ? "open" : "hidden");
+    } catch {
+      //no storage, no memory of the choice
+    }
+  }
+
   /*──────────────────────────────────────────────────────────────────────────*/
+
+  //a refused action: the toast says why, and a 409 means the row on screen is behind the server (another manager or a
+  //courier moved it), so the board reloads and the kebab stops offering what is gone
+  function failed(e: any) {
+    setToast({ text: errorMessage(e), severity: "error" });
+    if (e?.response?.status === 409) load();
+  }
 
   async function markUrgent(ids: number[]) {
     try {
@@ -76,7 +108,7 @@ export default function IssuancesBoard() {
       setSelected([]);
       load();
     } catch (e) {
-      setToast({ text: errorMessage(e), severity: "error" });
+      failed(e);
     }
   }
 
@@ -86,7 +118,7 @@ export default function IssuancesBoard() {
       setToast({ text: t("self_pickup_done"), severity: "success" });
       load();
     } catch (e) {
-      setToast({ text: errorMessage(e), severity: "error" });
+      failed(e);
     }
   }
 
@@ -110,22 +142,34 @@ export default function IssuancesBoard() {
   }
 
   return (
-    <div className="board">
+    <div className={`board ${sideOpen ? "" : "board--no-side"}`}>
       <div className="board__main">
         <div className="board__title-row">
           <div>
             <h1>{t("board_title")}</h1>
             <div className="board__updated">{updatedAt ? t("board_updated_at", { time: formatDateTime(updatedAt) }) : t("loading")}</div>
           </div>
-          <Button variant="contained" className="board__find" startIcon={<QrCodeScannerIcon />} onClick={() => setFinding(true)}>
-            {t("find_issuance")}
-          </Button>
+          <div className="board__title-actions">
+            {!sideOpen && (
+              <Button variant="outlined" startIcon={<ViewSidebarIcon />} onClick={() => toggleSidePanel(true)}>
+                {t("side_panel_show")}
+              </Button>
+            )}
+            <Button variant="contained" className="board__find" startIcon={<QrCodeScannerIcon />} onClick={() => setFinding(true)}>
+              {t("find_issuance")}
+            </Button>
+          </div>
         </div>
 
         <BoardFilters filters={filters} cities={summary.cities} onChange={changeFilters} />
 
-        {/* the range and the page arrows live in the table now: the grid footer on desktop, a bar above the cards on a phone */}
+        {/* the range and the page arrows live in the table now: the grid footer on desktop, a bar above the cards on a phone.
+            the key remounts it when the panel goes or comes back: the grid flexes its columns against the width it measured
+            at mount and keeps them when its box shrinks (a window resize re-flexes a wider box only), so a fresh mount is
+            the one way the freed or taken column reaches the headers. a width the manager dragged is lost with it, like on
+            any page change; page, sort and the selection are the board's and stay */}
         <IssuancesTable
+          key={sideOpen ? "with-side" : "full-width"}
           rows={data.rows}
           total={data.total}
           page={page}
@@ -140,7 +184,7 @@ export default function IssuancesBoard() {
         />
       </div>
 
-      <SideWidgets couriers={couriers} byCity={summary.by_city} />
+      {sideOpen && <SideWidgets couriers={couriers} byCity={summary.by_city} onHide={() => toggleSidePanel(false)} />}
 
       {finding && <FindNumberDialog lookup={async (number) => {
         //Exact number lookup ignores the board filters and stays behind the manager API guard.
@@ -162,6 +206,7 @@ export default function IssuancesBoard() {
         ids={assignIds}
         couriers={couriers}
         onClose={() => setAssignIds(null)}
+        onConflict={load}
         onDone={() => {
           setAssignIds(null);
           setSelected([]);

@@ -70,6 +70,15 @@ export const he = {
     widget_city_search: "חיפוש עיר",
     issuances_short: "הנפקות",
     group_count: "{{count}} הנפקות",
+    widget_unassigned_count: "{{count}} לא שובצו",
+    sort_by_name: "לפי שם",
+    sort_by_load: "לפי עומס",
+    side_panel_hide: "הסתרת פאנל",
+    side_panel_show: "הצגת פאנל צד",
+    //the kebab when the status allows some of its items only, and the detail when it allows none
+    row_actions_blocked: "הנפקה בסטטוס \"{{status}}\": חלק מהפעולות אינן זמינות",
+    row_actions_all_blocked: "הנפקה בסטטוס \"{{status}}\": לא ניתן לבצע עליה פעולות",
+    detail_status_locked: "ההנפקה בסטטוס \"{{status}}\" ולא ניתן לשנות אותה",
 
     // assign dialog
     assign_title: "שיוך שליח",
@@ -96,6 +105,13 @@ export const he = {
     delete_done: "ההנפקה נמחקה בהצלחה",
     back_to_board: "חזרה ללוח ההנפקות",
     self_pickup_done: "ההנפקה הועברה לאיסוף עצמי",
+    // the 409 of the transition table (shared/@rules.ts), worded from its parts
+    conflict_status_not_allowed: "לא ניתן לבצע {{action}} להנפקה {{number}}: היא בסטטוס \"{{status}}\"",
+    action_assign: "שיוך שליח",
+    action_self_pickup: "העברה לאיסוף עצמי",
+    action_delete: "מחיקה",
+    action_edit: "עריכה",
+    action_self_pickup_report: "דיווח מסירה באיסוף עצמי",
     //the handover at the warehouse: the report form of the courier, sent by the manager
     self_pickup_report: "דיווח מסירה באיסוף עצמי",
     self_pickup_report_title: "מסירה באיסוף עצמי - הנפקה {{number}}",

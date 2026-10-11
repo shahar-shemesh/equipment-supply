@@ -63,4 +63,21 @@ describe('issuance transitions', () => {
         }
         expect(message).toBe('issuance 1234567 is deleted, delete is not allowed');
     });
+
+    it('the 409 body carries the parts of the message, so the client can word it in hebrew', () => {
+        let body: any;
+        try {
+            assertCanDo('assign', { sap_number: sap, status: IssuanceStatus.partially_delivered });
+        } catch (e) {
+            body = e.getResponse();
+        }
+        expect(body).toEqual({
+            statusCode: 409,
+            message: 'issuance 1234567 is partially_delivered, assign is not allowed',
+            code: 'status_not_allowed',
+            sap_number: sap,
+            status: IssuanceStatus.partially_delivered,
+            action: 'assign',
+        });
+    });
 });

@@ -295,3 +295,29 @@ describe('deleted rows', () => {
         expect((await list(`status=${IssuanceStatus.deleted}`)).total).toBe(0);
     });
 });
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+describe('the summary', () => {
+    it('counts the unassigned rows of every city, not the assigned ones, and lists every live city', async () => {
+        const res = await request(app.getHttpServer()).get('/api/issuances/summary').set('Authorization', `Bearer ${token}`);
+        expect(res.status).toBe(200);
+
+        const expected = await ds.query(
+            `SELECT i.address_city AS city, COUNT(*)::int AS count FROM issuances i WHERE i.deleted_at IS NULL AND i.status = $1 GROUP BY i.address_city`,
+            [IssuanceStatus.unassigned],
+        );
+        expect(expected.length).toBeGreaterThan(0);
+        expect(res.body.by_city).toHaveLength(expected.length);
+        for (const row of expected) expect(res.body.by_city.find((c) => c.city === row.city)?.count).toBe(row.count);
+
+        //the seed has assigned rows in these cities too, which is the point of the test
+        const assigned = await count('i.status = $1', [IssuanceStatus.assigned]);
+        expect(assigned).toBeGreaterThan(0);
+        const sum = res.body.by_city.reduce((n, c) => n + c.count, 0);
+        expect(sum).toBe(await count('i.status = $1', [IssuanceStatus.unassigned]));
+
+        const cities = (await ds.query('SELECT DISTINCT i.address_city AS city FROM issuances i WHERE i.deleted_at IS NULL ORDER BY city')).map((r) => r.city);
+        expect(res.body.cities).toEqual(cities);
+    });
+});

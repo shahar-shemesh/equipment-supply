@@ -371,13 +371,14 @@ export class IssuancesService {
 
   /*──────────────────────────────────────────────────────────────────────────*/
 
-  // /api/issuances/summary - the "משלוחים לפי עיר" widget. open = still waiting for a courier or for delivery
+  // /api/issuances/summary - the "משלוחים לפי עיר" widget: how many still wait for a courier in each city ("X לא שובצו"
+  //in the spec), so assigned rows do not count. every date, like the courier load next to it
   async summary() {
     const byCity = await this.issuances
       .createQueryBuilder('i')
       .select('i.address_city', 'city')
       .addSelect('COUNT(*)', 'count')
-      .where('i.deleted_at IS NULL AND i.status IN (:...open)', { open: [IssuanceStatus.unassigned, IssuanceStatus.assigned] })
+      .where('i.deleted_at IS NULL AND i.status = :status', { status: IssuanceStatus.unassigned })
       .groupBy('i.address_city')
       .orderBy('count', 'DESC')
       .getRawMany();

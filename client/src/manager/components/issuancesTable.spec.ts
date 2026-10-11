@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@mui/x-data-grid-premium", () => ({ DataGridPremium: () => null }));
 vi.mock("@mui/x-data-grid-premium/locales", () => ({ heIL: { components: { MuiDataGrid: { defaultProps: { localeText: {} } } } } }));
 
-import { selectionToIds, sortModelToState } from "./IssuancesTable";
+import { IssuanceStatus } from "../../../../shared/@core";
+import { canSelect, selectionToIds, sortModelToState } from "./IssuancesTable";
 
 //the two adapters between the grid's models and the board's state. the grid itself is not rendered here (jsdom has no
 //layout for it); the mapping is what the bulk actions and the list request depend on
@@ -18,6 +19,23 @@ describe("selectionToIds", () => {
   it("exclude is every selectable id except the unchecked ones", () => {
     expect(selectionToIds({ type: "exclude", ids: new Set([2]) }, [1, 2, 3])).toEqual([1, 3]);
     expect(selectionToIds({ type: "exclude", ids: new Set() }, [1, 2, 3])).toEqual([1, 2, 3]);
+  });
+});
+
+describe("canSelect", () => {
+  it("lets a row into the selection only when the server takes both bar actions, assign and mark urgent", () => {
+    const expected: Record<IssuanceStatus, boolean> = {
+      [IssuanceStatus.unassigned]: true,
+      [IssuanceStatus.assigned]: true,
+      [IssuanceStatus.not_delivered]: true,
+      [IssuanceStatus.self_pickup]: true,
+      [IssuanceStatus.partially_delivered]: false, //frozen on the server, a 409 for the whole batch
+      [IssuanceStatus.delivered]: false,
+      [IssuanceStatus.deleted]: false,
+    };
+    for (const status of Object.values(IssuanceStatus)) {
+      expect([status, canSelect({ status } as any)]).toEqual([status, expected[status]]);
+    }
   });
 });
 

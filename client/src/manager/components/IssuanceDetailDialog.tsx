@@ -10,8 +10,9 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import ErrorIcon from "@mui/icons-material/Error";
 import HandshakeIcon from "@mui/icons-material/Handshake";
 
-import { IIssuance, IssuanceStatus, Priority } from "../../../../shared/@core";
-import { reasonKeys } from "../../../../shared/@utils";
+import { IIssuance, Priority } from "../../../../shared/@core";
+import { IssuanceAction, canDo } from "../../../../shared/@rules";
+import { reasonKeys, statusKeys } from "../../../../shared/@utils";
 import { StatusBadge } from "../../components/StatusBadge";
 import { del, errorMessage, get, patch } from "../../utils/service";
 import { displayNumber, fullAddress } from "../../utils/format";
@@ -51,12 +52,22 @@ export function IssuanceDetailDialog({ id, onClose, onChanged, onAssign }: Props
     if (id) load();
   }, [id]);
 
+  //a 409 means the issuance moved on the server while this dialog was open: show why, then reload it so the controls
+  //follow the status it really has
+  function failed(e: any) {
+    setError(errorMessage(e));
+    if (e?.response?.status === 409) {
+      load();
+      onChanged();
+    }
+  }
+
   async function update(body: any) {
     try {
       setIssuance(await patch(`/issuances/${id}`, body));
       onChanged();
     } catch (e) {
-      setError(errorMessage(e));
+      failed(e);
     }
   }
 
@@ -66,14 +77,17 @@ export function IssuanceDetailDialog({ id, onClose, onChanged, onAssign }: Props
       setDeleteStep("done");
       onChanged();
     } catch (e) {
-      setError(errorMessage(e));
+      failed(e);
     }
   }
 
   //the last attempt's undelivered lines, shown as the red alert at the top
   const lastAttempt = issuance?.current_task?.attempts?.slice(-1)[0];
   const failedItems = (lastAttempt?.items || []).filter((x) => !x.delivered).map((x) => ({ ...x, item: issuance.items.find((i) => i.id === x.item_id) }));
-  const closed = issuance && [IssuanceStatus.deleted, IssuanceStatus.delivered, IssuanceStatus.self_pickup].includes(issuance.status);
+  //the same table the server checks (shared/@rules.ts), action by action: self_pickup still takes a courier, a date or a
+  //delete, delivered / partially_delivered / deleted take nothing and say so instead of a 409
+  const can = (action: IssuanceAction) => !!issuance && canDo(action, issuance.status);
+  const locked = !!issuance && !can("edit") && !can("assign") && !can("delete") && !can("self_pickup_report");
 
   return (
     <Dialog open={!!id} onClose={onClose} maxWidth="md" fullWidth className="detail-dialog">
@@ -97,7 +111,7 @@ export function IssuanceDetailDialog({ id, onClose, onChanged, onAssign }: Props
             </div>
 
             <FormControlLabel
-              control={<Switch checked={issuance.priority === Priority.urgent} disabled={closed} onChange={(e) => update({ priority: e.target.checked ? Priority.urgent : Priority.normal })} />}
+              control={<Switch checked={issuance.priority === Priority.urgent} disabled={!can("edit")} onChange={(e) => update({ priority: e.target.checked ? Priority.urgent : Priority.normal })} />}
               label={t("detail_mark_urgent")}
             />
 
@@ -118,7 +132,7 @@ export function IssuanceDetailDialog({ id, onClose, onChanged, onAssign }: Props
                 <label>{t("detail_courier")}</label>
                 {/* a self pickup handed over at the warehouse has no courier, the manager who did it stands there */}
                 <strong>{issuance.current_task?.courier?.name || issuance.delivered_by_name || t("detail_no_courier")}</strong>
-                {!closed && (
+                {can("assign") && (
                   <button type="button" className="link-button with-icon" onClick={() => onAssign(issuance.id)}>
                     <EditIcon fontSize="inherit" /> {t("change_courier")}
                   </button>
@@ -141,22 +155,24 @@ export function IssuanceDetailDialog({ id, onClose, onChanged, onAssign }: Props
               )}
             </section>
 
+            {locked && <Alert severity="info" className="detail-dialog__locked">{t("detail_status_locked", { status: t(statusKeys[issuance.status]) })}</Alert>}
+
             <section className="detail-dialog__section detail-dialog__actions">
               <div className="field">
                 <label><CalendarMonthIcon fontSize="inherit" /> {t("detail_delivery_date")}</label>
-                <TextField type="date" value={issuance.delivery_date || ""} disabled={closed} onChange={(e) => update({ delivery_date: e.target.value })} />
+                <TextField type="date" value={issuance.delivery_date || ""} disabled={!can("edit")} onChange={(e) => update({ delivery_date: e.target.value })} />
               </div>
-              {!closed && (
+              {can("self_pickup") && (
                 <Button variant="outlined" startIcon={<PersonIcon />} onClick={() => update({ self_pickup: true })}>
                   {t("row_self_pickup")}
                 </Button>
               )}
-              {issuance.status === IssuanceStatus.self_pickup && (
+              {can("self_pickup_report") && (
                 <Button variant="contained" startIcon={<HandshakeIcon />} onClick={() => setHandover(true)}>
                   {t("self_pickup_report")}
                 </Button>
               )}
-              {issuance.status !== IssuanceStatus.deleted && deleteStep === "none" && (
+              {can("delete") && deleteStep === "none" && (
                 <Button color="error" startIcon={<DeleteOutlineIcon />} onClick={() => setDeleteStep("reason")}>
                   {t("row_delete")}
                 </Button>

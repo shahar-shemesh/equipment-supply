@@ -1,35 +1,24 @@
 import { ConflictException } from '@nestjs/common';
 
 import { IssuanceStatus } from '../../../shared/@core';
+import { IssuanceAction, canDo } from '../../../shared/@rules';
 
-export type IssuanceAction = 'assign' | 'self_pickup' | 'delete' | 'edit' | 'self_pickup_report';
-
-//which statuses each manager action may start from. anything not listed gets a 409.
-//
-//partially_delivered is in no row on purpose: nobody decided yet what happens with the lines that were already delivered.
-//a new task with the remaining lines only? the courier sees all lines with the delivered ones marked? back to SAP for a new
-//document? until that is answered a partially delivered issuance is frozen and the manager gets the 409 message.
-//delivered is closed for good, deleted too. self_pickup can still be assigned (manager changed their mind) or deleted,
-//and it is the only status the handover report (the manager hands over at the warehouse) may start from: the report
-//sets the status from its outcome, so a second one finds delivered / not_delivered / partially_delivered and gets the 409
-const allowedFrom: Record<IssuanceAction, IssuanceStatus[]> = {
-  assign: [IssuanceStatus.unassigned, IssuanceStatus.assigned, IssuanceStatus.not_delivered, IssuanceStatus.self_pickup],
-  self_pickup: [IssuanceStatus.unassigned, IssuanceStatus.assigned, IssuanceStatus.not_delivered],
-  delete: [IssuanceStatus.unassigned, IssuanceStatus.assigned, IssuanceStatus.not_delivered, IssuanceStatus.self_pickup],
-  edit: [IssuanceStatus.unassigned, IssuanceStatus.assigned, IssuanceStatus.not_delivered, IssuanceStatus.self_pickup],
-  self_pickup_report: [IssuanceStatus.self_pickup],
-};
-
-//priority / date / notes may change on these. mark-urgent on the board uses it to skip the closed rows
-export const editableStatuses = allowedFrom.edit;
-
-export function canDo(action: IssuanceAction, status: IssuanceStatus) {
-  return allowedFrom[action].includes(status);
-}
+//the table itself lives in shared/@rules.ts so the manager board disables what this file refuses. this side adds the 409
+export { allowedFrom, canDo, editableStatuses } from '../../../shared/@rules';
+export type { IssuanceAction } from '../../../shared/@rules';
 
 /*──────────────────────────────────────────────────────────────────────────*/
 
+//the body keeps the english message (the e2e specs match on it) and names the parts next to it, so the client can
+//word the refusal in hebrew without parsing the sentence
 export function assertCanDo(action: IssuanceAction, issuance: { sap_number: string; status: IssuanceStatus }) {
   if (canDo(action, issuance.status)) return;
-  throw new ConflictException(`issuance ${issuance.sap_number} is ${issuance.status}, ${action} is not allowed`);
+  throw new ConflictException({
+    statusCode: 409,
+    message: `issuance ${issuance.sap_number} is ${issuance.status}, ${action} is not allowed`,
+    code: 'status_not_allowed',
+    sap_number: issuance.sap_number,
+    status: issuance.status,
+    action,
+  });
 }

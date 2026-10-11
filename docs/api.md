@@ -7,9 +7,9 @@ All routes are under `/api` and need `Authorization: Bearer <token>` except logi
 | Route | Role | What |
 | --- | --- | --- |
 | `POST /auth/login`, `GET /auth/me`, `GET /auth/dev-accounts` | | development login; the user object carries `id` next to the JWT's `sub` |
-| `GET /issuances`, `GET /issuances/:id`, `GET /issuances/summary` | manager | board (`?sort=number|customer|destination|city|courier|priority|status&order=asc|desc`, filters, paging; `status`, `priority` and `city` also take a comma list, `status=assigned,delivered` is an `IN`), detail, the cities widget |
+| `GET /issuances`, `GET /issuances/:id`, `GET /issuances/summary` | manager | board (`?sort=number|customer|destination|city|courier|priority|status&order=asc|desc`, filters, paging; `status`, `priority` and `city` also take a comma list, `status=assigned,delivered` is an `IN`), detail, the cities widget (`by_city` counts the `unassigned` rows of every city, all dates, a city with none is not listed; `cities` is every live city for the filter) |
 | `PATCH /issuances/:id` | manager | priority, delivery date, notes, self pickup |
-| `POST /issuances/assign`, `POST /issuances/mark-urgent` | manager | bulk actions |
+| `POST /issuances/assign`, `POST /issuances/mark-urgent` | manager | bulk actions. `assign` is all or nothing: one row the transition table refuses answers 409 `status_not_allowed` (`sap_number`, `status`, `action` in the body, see [Status transitions](domain.md#rules-enforced-on-the-server)) and nothing is written; `mark-urgent` skips the rows it may not touch and answers the count |
 | `POST /issuances/:id/self-pickup/report` | manager | the handover at the warehouse of a `self_pickup` issuance: the courier's report body (`IAttemptPayload` without the offline fields), checked by the same validators; answers the issuance as `GET /issuances/:id` does, 201; 409 from any other status, a second report included |
 | `DELETE /issuances/:id` | manager | soft delete with a reason |
 | `GET /couriers` | manager | couriers with their open task count |

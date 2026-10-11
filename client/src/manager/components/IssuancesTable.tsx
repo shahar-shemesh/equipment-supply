@@ -13,7 +13,9 @@ import UnfoldMoreIcon from "@mui/icons-material/UnfoldMore";
 import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
 
-import { IIssuance, ISortState, IssuanceSortKey, IssuanceStatus, issuanceSortKeys } from "../../../../shared/@core";
+import { IIssuance, ISortState, IssuanceSortKey, issuanceSortKeys } from "../../../../shared/@core";
+import { IssuanceAction, canDo } from "../../../../shared/@rules";
+import { statusKeys } from "../../../../shared/@utils";
 import { PriorityBadge, StatusBadge } from "../../components/StatusBadge";
 import { displayNumber, fullAddress } from "../../utils/format";
 import { useBreakpoint } from "../../utils/useBreakpoint";
@@ -48,9 +50,20 @@ const columnKeys: Record<IssuanceSortKey, string> = {
   status: "col_status",
 };
 
-//closed issuances cannot be selected for assignment
-function canSelect(row: IIssuance) {
-  return row.status === IssuanceStatus.unassigned || row.status === IssuanceStatus.assigned || row.status === IssuanceStatus.not_delivered || row.status === IssuanceStatus.partially_delivered;
+//what the server checks behind every kebab item (shared/@rules.ts), so a row only offers what it would accept
+const actionRules: Record<RowAction, IssuanceAction> = {
+  change_date: "edit",
+  self_pickup: "self_pickup",
+  mark_urgent: "edit",
+  change_courier: "assign",
+  delete: "delete",
+};
+
+//the bottom bar has two actions, assign and mark urgent. a row joins the selection only when the server takes both:
+//assign is all or nothing (one refused row fails the batch with a 409), mark urgent skips what it may not touch, and
+//neither should happen from a checkbox. partially_delivered is frozen on the server and stays out of the selection
+export function canSelect(row: IIssuance) {
+  return canDo("assign", row.status) && canDo("edit", row.status);
 }
 
 function rowSelectable(p: GridRowParams<IIssuance>) {
@@ -154,14 +167,18 @@ export function IssuancesTable({ rows, total, page, loading, selected, onSelect,
     paginationDisplayedRows: ({ from, to, count }) => t("board_range", { from, to, total: count }),
   }), [t]);
 
-  //one menu for the grid rows and the cards, anchored to whichever kebab was tapped
+  //one menu for the grid rows and the cards, anchored to whichever kebab was tapped. an item the server would refuse
+  //for this row's status is disabled, not hidden, and a caption at the top says why the menu is short
+  const allowed = (action: RowAction) => !menu || canDo(actionRules[action], menu.row.status);
+  const blocked = !!menu && (Object.keys(actionRules) as RowAction[]).some((action) => !allowed(action));
   const actionsMenu = (
     <Menu open={!!menu} anchorEl={menu?.anchor} onClose={() => setMenu(null)}>
-      <MenuItem onClick={() => act("change_date")}><ListItemIcon><CalendarMonthIcon fontSize="small" /></ListItemIcon>{t("row_change_date")}</MenuItem>
-      <MenuItem onClick={() => act("self_pickup")}><ListItemIcon><PersonIcon fontSize="small" /></ListItemIcon>{t("row_self_pickup")}</MenuItem>
-      <MenuItem onClick={() => act("mark_urgent")}><ListItemIcon><ErrorOutlineIcon fontSize="small" /></ListItemIcon>{t("mark_urgent")}</MenuItem>
-      <MenuItem onClick={() => act("change_courier")}><ListItemIcon><LocalShippingIcon fontSize="small" /></ListItemIcon>{t("row_change_courier")}</MenuItem>
-      <MenuItem onClick={() => act("delete")} className="menu-item--danger"><ListItemIcon><DeleteOutlineIcon fontSize="small" color="error" /></ListItemIcon>{t("row_delete")}</MenuItem>
+      {blocked && <MenuItem disabled className="menu-item--caption">{t("row_actions_blocked", { status: t(statusKeys[menu.row.status]) })}</MenuItem>}
+      <MenuItem disabled={!allowed("change_date")} onClick={() => act("change_date")}><ListItemIcon><CalendarMonthIcon fontSize="small" /></ListItemIcon>{t("row_change_date")}</MenuItem>
+      <MenuItem disabled={!allowed("self_pickup")} onClick={() => act("self_pickup")}><ListItemIcon><PersonIcon fontSize="small" /></ListItemIcon>{t("row_self_pickup")}</MenuItem>
+      <MenuItem disabled={!allowed("mark_urgent")} onClick={() => act("mark_urgent")}><ListItemIcon><ErrorOutlineIcon fontSize="small" /></ListItemIcon>{t("mark_urgent")}</MenuItem>
+      <MenuItem disabled={!allowed("change_courier")} onClick={() => act("change_courier")}><ListItemIcon><LocalShippingIcon fontSize="small" /></ListItemIcon>{t("row_change_courier")}</MenuItem>
+      <MenuItem disabled={!allowed("delete")} onClick={() => act("delete")} className="menu-item--danger"><ListItemIcon><DeleteOutlineIcon fontSize="small" color="error" /></ListItemIcon>{t("row_delete")}</MenuItem>
     </Menu>
   );
 
