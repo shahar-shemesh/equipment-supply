@@ -167,12 +167,12 @@
     // a compact box, the status buttons sit next to it. full width on a phone, where nothing fits beside it anyway.
     // the placeholder is longer than the box, it ends in an ellipsis instead of being cut mid letter
     &__search {
-        flex: 1 1 260px;
-        max-width: 360px;
+        flex: 1 1 300px;
+        max-width: 420px;
 
         // smaller still next to the table, the status buttons need the room on one line at 1440
         @include bp.above-compact {
-            max-width: 320px;
+            max-width: 380px;
         }
 
         @include bp.phone {
@@ -690,7 +690,7 @@
         gap: 12px;
         font-size: 14px;
 
-        > span {
+        >span {
             min-width: 0;
             overflow-wrap: anywhere;
         }
@@ -1068,7 +1068,7 @@
         padding: 8px 0;
         border-bottom: 1px solid var(--color-border);
 
-        > div {
+        >div {
             display: flex;
             justify-content: space-between;
             gap: 12px;
