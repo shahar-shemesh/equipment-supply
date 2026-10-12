@@ -25,6 +25,13 @@ const theme = createTheme({
     MuiButton: { styleOverrides: { root: { textTransform: "none", fontWeight: 500, boxShadow: "none" } } },
     MuiTextField: { defaultProps: { size: "small" } },
     MuiSelect: { defaultProps: { size: "small" } },
+    //no scroll lock on any modal (dialog, menu, select, drawer all sit on MuiModal): the lock hides the page scrollbar
+    //and pads body by its width, but the board keeps the scrollbar room with scrollbar-gutter (styles/_manager.scss),
+    //so the padding only shifted the page 15px on every dialog and menu. with the scrollbar always there nothing has to
+    //be compensated. the wheel still scrolls the page under the backdrop, which the short fixed dialogs do not mind
+    MuiModal: { defaultProps: { disableScrollLock: true } },
+    //popover (menu, select) does not inherit that one: it defaults disableScrollLock to false itself and hands it down
+    MuiPopover: { defaultProps: { disableScrollLock: true } },
     //every dialog becomes a full screen page on a phone, without touching each <Dialog>. the nested confirm dialogs too
     MuiDialog: {
       styleOverrides: {
