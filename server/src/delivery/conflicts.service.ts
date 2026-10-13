@@ -211,7 +211,9 @@ export class ConflictsService {
 
   // GET /api/conflicts/:id  (manager)  -  the evidence with its signature, next to the authoritative state right now
   async findOne(id: number) {
-    const row = await this.conflicts.findOne({ where: { id }, relations: { task: { issuance: { items: true }, courier: true } } });
+    //withDeleted: the review names the lines as the report knew them, a line the manager took off since included
+    //(removed_at set on it), which is the very line a revision_changed report is in dispute about
+    const row = await this.conflicts.findOne({ where: { id }, relations: { task: { issuance: { items: true }, courier: true } }, withDeleted: true });
     if (!row) throw new NotFoundException(`conflict ${id} not found`);
     const names = await this.reviewerNames([row]);
 

@@ -127,6 +127,7 @@ export interface IIssuanceItem {
   station_number?: string;
   serial_number?: string;
   quantity: number;
+  removed_at?: string | null; //set when the manager took the line off the issuance; such a line is left out of every issuance and task load
 }
 
 export interface IIssuance {
@@ -145,7 +146,7 @@ export interface IIssuance {
   self_pickup: boolean;
   notes?: string;
   source: string;
-  revision?: number; //bumped by every change that invalidates an offline delivery report (assign, self pickup, delete, a report). priority / date / notes edits leave it alone
+  revision?: number; //bumped by every change that invalidates an offline delivery report (assign, self pickup, delete, a line removed, a report). priority / date / notes edits leave it alone
   deleted_at?: string;
   delete_reason?: string;
   items?: IIssuanceItem[];
@@ -331,6 +332,7 @@ export enum AuditAction {
   issuance_self_pickup = "issuance.self_pickup",
   issuance_self_pickup_report = "issuance.self_pickup_report", //the manager handed over at the warehouse
   issuance_mark_urgent = "issuance.mark_urgent",
+  issuance_remove_item = "issuance.remove_item", //one SAP line taken off the document
   issuance_delete = "issuance.delete",
   courier_create = "courier.create",
   courier_reactivate = "courier.reactivate", //a deleted courier added again under the same id number

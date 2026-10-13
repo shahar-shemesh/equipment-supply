@@ -1062,11 +1062,29 @@
         flex-wrap: wrap;
     }
 
+    // the success line of a removed item, between the actions and the items it concerns
+    &__removed.MuiAlert-root {
+        margin-top: 16px;
+    }
+
     &__items .item-lines {
         display: grid;
         grid-template-columns: 1fr;
         padding: 8px 0;
         border-bottom: 1px solid var(--color-border);
+        position: relative;
+
+        // the remove icon hangs at the trailing edge of the line, outside the grid rows; the rows keep clear of it
+        // so the product name (end aligned) never runs under the icon, on a phone too
+        &--removable {
+            padding-inline-end: 44px;
+        }
+
+        &__remove {
+            position: absolute;
+            top: 4px;
+            inset-inline-end: 0;
+        }
 
         >div {
             display: flex;

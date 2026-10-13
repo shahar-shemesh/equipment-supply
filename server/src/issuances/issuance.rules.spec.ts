@@ -1,7 +1,7 @@
 import { ConflictException } from '@nestjs/common';
 
 import { IssuanceStatus } from '../../../shared/@core';
-import { assertCanDo, canDo } from './issuance.rules';
+import { allowedFrom, assertCanDo, canDo } from './issuance.rules';
 
 const sap = '1234567';
 
@@ -52,6 +52,17 @@ describe('issuance transitions', () => {
             expect(canDo('self_pickup_report', status)).toBe(false);
         }
         expect(() => assertCanDo('self_pickup_report', { sap_number: sap, status: IssuanceStatus.delivered })).toThrow(/delivered, self_pickup_report is not allowed/);
+    });
+
+    it('a line may be taken off wherever the document may still be edited, nowhere else', () => {
+        expect(allowedFrom.remove_item).toEqual(allowedFrom.edit);
+        for (const status of [IssuanceStatus.unassigned, IssuanceStatus.assigned, IssuanceStatus.not_delivered, IssuanceStatus.self_pickup]) {
+            expect(canDo('remove_item', status)).toBe(true);
+        }
+        for (const status of [IssuanceStatus.delivered, IssuanceStatus.partially_delivered, IssuanceStatus.deleted]) {
+            expect(canDo('remove_item', status)).toBe(false);
+        }
+        expect(() => assertCanDo('remove_item', { sap_number: sap, status: IssuanceStatus.delivered })).toThrow(/delivered, remove_item is not allowed/);
     });
 
     it('the 409 message names the issuance, the status and the action', () => {

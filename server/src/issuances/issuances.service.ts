@@ -1,9 +1,9 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository } from 'typeorm';
 
 import { AuditAction, AuditEntityType, IssuanceSortKey, IssuanceStatus, Priority, TaskStatus } from '../../../shared/@core';
-import { Issuance, DeliveryTask, DeliveryAttempt, Courier } from '../entities';
+import { Issuance, IssuanceItem, DeliveryTask, DeliveryAttempt, Courier } from '../entities';
 import { AuditService } from '../audit/audit.service';
 import { changesBetween, snapshot } from '../audit/audit.diff';
 import { handedOver, outcomeOf, validateItemAnswers, validateRecipient, validateSignature } from '../delivery/attempt.validation';
@@ -60,6 +60,12 @@ export async function cancelOpenTasks(em: EntityManager, issuanceId: number) {
 
 function isIsoDate(s: any) {
   return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(Date.parse(s));
+}
+
+//a path id after the controller's unary plus: "abc" is NaN, and anything past int4 would be a database error (500)
+//instead of a 400
+function isId(n: any) {
+  return Number.isInteger(n) && n > 0 && n <= 2147483647;
 }
 
 //the board's status quick actions and city multi select send one comma list (status=assigned,delivered); one value is
@@ -178,6 +184,11 @@ export class IssuancesService {
       const locked = await lockIssuance(em, id);
       if (!locked) throw new NotFoundException(`issuance ${id} not found`);
       assertCanDo('self_pickup_report', locked);
+      //the answers were checked against the lines loaded above; a removal by another manager (removeItem) can commit in
+      //between, and the status check would not notice an answer on a line that is gone. the detail reloads on a 409
+      if (locked.revision !== issuance.revision) {
+        throw new ConflictException({ statusCode: 409, message: `issuance ${locked.sap_number} changed meanwhile, reload it and report again`, code: 'revision_changed', sap_number: locked.sap_number });
+      }
 
       //the task is born closed: the handover is the delivery, there was never anything to drive. courier_id null keeps
       //it off every courier board (delivery.service filters by courier_id)
@@ -367,6 +378,41 @@ export class IssuancesService {
     });
 
     return { deleted: id };
+  }
+
+  /*──────────────────────────────────────────────────────────────────────────*/
+
+  // DELETE /api/issuances/:id/items/:itemId
+  //one SAP line off the document. soft (removed_at, see issuance-item.entity): a past attempt keeps its item_id reference,
+  //the live loads simply stop seeing the line. the last line is refused: validateItemAnswers rejects an issuance with
+  //no lines, so an empty issuance could never be delivered, the manager deletes it instead. the revision moves and the
+  //open task stays, so a report the tablet signed against the old line set meets the 409 of delivery.service and a
+  //courier who refreshes simply sees one line less. allowed from the edit statuses (shared/@rules.ts, open decision 14)
+  async removeItem(id: number, itemId: number, user: any) {
+    if (!isId(id)) throw new BadRequestException('issuance id must be a positive integer');
+    if (!isId(itemId)) throw new BadRequestException('item id must be a positive integer');
+
+    await this.issuances.manager.transaction(async (em) => {
+      const issuance = await lockIssuance(em, id);
+      if (!issuance) throw new NotFoundException(`issuance ${id} not found`);
+      assertCanDo('remove_item', issuance);
+
+      //find and count see live lines only (the delete date column), so a line removed earlier is a 404 like a foreign one
+      const item = await em.findOne(IssuanceItem, { where: { id: itemId, issuance_id: id } });
+      if (!item) throw new NotFoundException(`item ${itemId} not found in issuance ${id}`);
+      const live = await em.count(IssuanceItem, { where: { issuance_id: id } });
+      if (live <= 1) {
+        throw new ConflictException({ statusCode: 409, message: `issuance ${issuance.sap_number} has one item left, delete the issuance instead`, code: 'last_item', sap_number: issuance.sap_number });
+      }
+
+      //em.update and not save: the locked issuance has no relations loaded and a save would null what it does not know
+      await em.update(IssuanceItem, itemId, { removed_at: new Date() });
+      await em.update(Issuance, id, { revision: issuance.revision + 1 });
+      await this.audit.record(em, { actor: user, action: AuditAction.issuance_remove_item, entity_type: AuditEntityType.issuance, entity_id: id, issuance_id: id, details: { item_id: itemId, line_no: item.line_no, product_name: item.product_name, items_left: live - 1, revision: issuance.revision + 1 } });
+      this.logger.log(`issuance ${issuance.sap_number} line ${item.line_no} (${item.product_name}) removed by user ${user?.sub}, ${live - 1} left`);
+    });
+
+    return this.findOne(id);
   }
 
   /*──────────────────────────────────────────────────────────────────────────*/

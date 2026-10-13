@@ -56,10 +56,11 @@ export class Issuance {
 
   //the concurrency token of an offline delivery report: the tablet stores it with the snapshot and sends it back, a
   //different number means the issuance changed materially since. bumped inside the locked transactions of assign,
-  //self pickup, delete and the report itself. priority / delivery_date / notes edits and mark urgent leave it alone,
-  //a report written before such an edit is still good. today every bump also cancels or closes the task, so the task
-  //check in delivery.service fires first and this is a forward guard for bump sources that do not touch the task
-  //(item or customer changes from SAP, when that interface exists)
+  //self pickup, delete, a line the manager took off (issuances.service.removeItem) and the report itself. priority /
+  //delivery_date / notes edits and mark urgent leave it alone, a report written before such an edit is still good.
+  //assign, self pickup, delete and the report also cancel or close the task, so for those the task check in
+  //delivery.service fires first; a line removal leaves the task alone and is the one flow that reaches the revision
+  //check there (item or customer changes from SAP will take the same path, when that interface exists)
   @Column({ default: 1 })
   revision: number;
 

@@ -52,4 +52,10 @@ export class IssuancesController {
   remove(@Param('id') id: string, @Body() body: any, @CurrentUser() user: any) {
     return this.svc.softDelete(+id, body?.reason, user);
   }
+
+  //one line off the document. "abc" becomes NaN here and the service answers 400, like a bad body field
+  @Delete(':id/items/:itemId')
+  removeItem(@Param('id') id: string, @Param('itemId') itemId: string, @CurrentUser() user: any) {
+    return this.svc.removeItem(+id, +itemId, user);
+  }
 }

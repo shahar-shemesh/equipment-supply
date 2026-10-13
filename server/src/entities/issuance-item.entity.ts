@@ -1,4 +1,4 @@
-import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, DeleteDateColumn, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
 
 import { Issuance } from './issuance.entity';
 
@@ -32,4 +32,11 @@ export class IssuanceItem {
 
   @Column({ default: 1 })
   quantity: number;
+
+  //a line the manager took off the issuance (issuances.service.removeItem). soft on purpose: delivery_attempt_items.item_id
+  //points here with no foreign key, so a past attempt keeps its reference. a delete date column and not a plain flag
+  //because typeorm then leaves the line out of every relation load (find relations, leftJoinAndSelect): the boards, the
+  //detail, the courier's task and the report validators see live lines only without a filter of their own
+  @DeleteDateColumn({ type: 'timestamptz', nullable: true })
+  removed_at: Date;
 }

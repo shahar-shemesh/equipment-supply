@@ -53,6 +53,11 @@ export function errorMessage(err: any) {
   if (data?.code === "status_not_allowed" && statusKeys[data.status] && actionKeys[data.action]) {
     return i18n.t("conflict_status_not_allowed", { number: data.sap_number, status: i18n.t(statusKeys[data.status]), action: i18n.t(actionKeys[data.action]) });
   }
+  //the only line left on an issuance cannot be removed (issuances.service.removeItem), the body names the issuance
+  if (data?.code === "last_item" && data.sap_number) return i18n.t("item_remove_last", { number: data.sap_number });
+  //the handover met a line removal that committed between its validation and its lock (issuances.service
+  //.reportSelfPickup); the detail dialog reloads on a 409, so the fresh lines are already on screen
+  if (data?.code === "revision_changed" && data.sap_number) return i18n.t("handover_revision_changed", { number: data.sap_number });
   const m = data?.message;
   return Array.isArray(m) ? m.join(", ") : m || err?.message || "שגיאה לא ידועה";
 }

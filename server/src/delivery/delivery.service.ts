@@ -1,10 +1,10 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
 
 import { AuditAction, AuditEntityType, IAttemptResult, IssuanceStatus, ReportConflictCode, TaskStatus } from '../../../shared/@core';
 import { normalizeSapNumber } from '../../../shared/@utils';
-import { DeliveryTask, DeliveryAttempt, Issuance, DeliveryOperation } from '../entities';
+import { DeliveryTask, DeliveryAttempt, Issuance, IssuanceItem, DeliveryOperation } from '../entities';
 import { AuditService } from '../audit/audit.service';
 import { lockIssuance } from '../issuances/issuances.service';
 import { handedOver, outcomeOf, validateItemAnswers, validateRecipient, validateSignature } from './attempt.validation';
@@ -112,7 +112,13 @@ export class DeliveryService {
     //closed it, and that is decided under the lock below
     if (!operationId && task.status !== TaskStatus.pending) throw conflict('task already closed', ReportConflictCode.task_closed);
 
-    const answers = validateItemAnswers(task.issuance.items, body?.items);
+    //a report written against a line set that changed since (the manager took a line off, which bumps the revision and
+    //leaves the task alone) must reach the lock and be refused there as revision_changed with its evidence intact, not
+    //die here as a 400 unknown item. so when the submitted revision is behind, the removed lines it names count as
+    //known for this check only (linesAsSigned). the revision itself is not compared here: a legitimate replay carries
+    //the revision from before the report that bumped it, and is answered from the stored operation under the lock first
+    const stale = issuanceRevision != null && issuanceRevision !== task.issuance.revision;
+    const answers = validateItemAnswers(stale ? await this.linesAsSigned(task, body?.items) : task.issuance.items, body?.items);
     const outcome = outcomeOf(answers);
     //a report that delivered nothing has no one to sign: recipient and signature are optional then and stored as null
     const recipient = validateRecipient(body, task.issuance, handedOver(answers));
@@ -137,10 +143,14 @@ export class DeliveryService {
           throw conflict('task is no longer open, it was reported or reassigned meanwhile', locked?.status === TaskStatus.cancelled ? ReportConflictCode.task_cancelled : ReportConflictCode.task_closed);
         }
         if (issuance.status !== IssuanceStatus.assigned) throw conflict(`issuance is ${issuance.status}, a delivery report needs it assigned`, ReportConflictCode.issuance_not_assigned);
-        //cannot happen through a real flow today (every bump also cancels or closes the task, caught above), a forward
-        //guard for bumps that leave the task alone. see the revision column in issuance.entity
-        if (issuanceRevision != null && issuanceRevision !== issuance.revision) {
-          throw conflict(`issuance changed since revision ${issuanceRevision}, it is at ${issuance.revision} now`, ReportConflictCode.revision_changed);
+        //reached by a bump that left the task alone: a line the manager took off (issuances.service.removeItem), and
+        //later item or customer changes from SAP. the stale report was let through the validator above for this, so it
+        //is refused here with its evidence intact. see the revision column in issuance.entity.
+        //a legacy request (no revision in the body) is held to the revision it was validated against: a removal can
+        //commit between that validation and this lock, and nothing else would notice an answer on a line that is gone
+        const expected = issuanceRevision ?? task.issuance.revision;
+        if (expected !== issuance.revision) {
+          throw conflict(`issuance changed since revision ${expected}, it is at ${issuance.revision} now`, ReportConflictCode.revision_changed);
         }
 
         const attempt = em.create(DeliveryAttempt, {
@@ -217,6 +227,20 @@ export class DeliveryService {
     const task = await this.tasks.findOne({ where: { issuance_id: issuance.id, courier_id: this.courierIdOf(user) }, order: { id: 'DESC' } });
     if (!task || task.status === TaskStatus.cancelled) throw new ForbiddenException('issuance is not assigned to you');
     return { task_id: task.id };
+  }
+
+  /*──────────────────────────────────────────────────────────────────────────*/
+
+  //the line set a report that is behind is checked against: the live lines plus the removed ones it names. not every
+  //removed line: a snapshot taken between two removals never knew the earlier one, and "one answer per line" would
+  //refuse it as a 400 for a line it could not have answered. the live lines are always all in the snapshot (a line is
+  //only ever taken off, never added), an id that never belonged is still unknown and a duplicate still fails the count.
+  //such a report is never applied: under the lock it is replayed or refused as revision_changed. the delete date column
+  //hides removed lines from every relation load, this is the one place that asks for them
+  private async linesAsSigned(task: DeliveryTask, raw: any) {
+    const named = new Set(Array.isArray(raw) ? raw.map((a: any) => Number(a?.item_id)) : []);
+    const removed = await this.tasks.manager.find(IssuanceItem, { where: { issuance_id: task.issuance_id, removed_at: Not(IsNull()) }, withDeleted: true });
+    return [...task.issuance.items, ...removed.filter((line) => named.has(line.id))];
   }
 
   /*──────────────────────────────────────────────────────────────────────────*/

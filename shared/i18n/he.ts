@@ -107,11 +107,14 @@ export const he = {
     self_pickup_done: "ההנפקה הועברה לאיסוף עצמי",
     // the 409 of the transition table (shared/@rules.ts), worded from its parts
     conflict_status_not_allowed: "לא ניתן לבצע {{action}} להנפקה {{number}}: היא בסטטוס \"{{status}}\"",
+    // the handover's 409 when a line left the issuance while the form was open (conflict_revision_changed below is the courier's)
+    handover_revision_changed: "הנפקה {{number}} השתנתה בינתיים, הנתונים נטענו מחדש. יש לדווח שוב",
     action_assign: "שיוך שליח",
     action_self_pickup: "העברה לאיסוף עצמי",
     action_delete: "מחיקה",
     action_edit: "עריכה",
     action_self_pickup_report: "דיווח מסירה באיסוף עצמי",
+    action_remove_item: "הסרת פריט",
     //the handover at the warehouse: the report form of the courier, sent by the manager
     self_pickup_report: "דיווח מסירה באיסוף עצמי",
     self_pickup_report_title: "מסירה באיסוף עצמי - הנפקה {{number}}",
@@ -126,6 +129,13 @@ export const he = {
     item_quantity: "כמות",
     item_unit: "יח'",
     item_n: "מוצר {{n}}",
+    //one line off the issuance, the delete icon per line in the detail dialog and the 409 of the last line
+    item_remove: "הסרת פריט מההנפקה",
+    item_remove_last: "לא ניתן להסיר את הפריט האחרון מהנפקה {{number}}. כדי לבטל אותה יש למחוק את ההנפקה",
+    item_remove_confirm_title: "הסרת פריט",
+    item_remove_confirm_text: "האם להסיר את הפריט \"{{name}}\" מההנפקה? לא ניתן יהיה להחזיר אותו",
+    item_remove_confirm_button: "הסרה",
+    item_removed: "הפריט \"{{name}}\" הוסר מההנפקה",
 
     // couriers page (לוח ניהול שליחים)
     couriers_title: "לוח ניהול שליחים",

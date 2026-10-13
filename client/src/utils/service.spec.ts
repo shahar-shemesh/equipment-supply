@@ -21,6 +21,20 @@ describe("errorMessage", () => {
     expect(errorMessage(err)).toBe('לא ניתן לבצע שיוך שליח להנפקה 1234567: היא בסטטוס "נמסר חלקית"');
   });
 
+  it("words the refusal of the last line with the issuance number and what to do instead", () => {
+    const err = axiosError({ statusCode: 409, message: "issuance 1234567 has one item left, delete the issuance instead", code: "last_item", sap_number: "1234567" });
+    expect(errorMessage(err)).toBe("לא ניתן להסיר את הפריט האחרון מהנפקה 1234567. כדי לבטל אותה יש למחוק את ההנפקה");
+    //without the number there is nothing to word, the server message stands
+    expect(errorMessage(axiosError({ statusCode: 409, message: "x", code: "last_item" }))).toBe("x");
+  });
+
+  it("words the handover's refusal when a line left the issuance meanwhile", () => {
+    const err = axiosError({ statusCode: 409, message: "issuance 1234567 changed meanwhile, reload it and report again", code: "revision_changed", sap_number: "1234567" });
+    expect(errorMessage(err)).toBe("הנפקה 1234567 השתנתה בינתיים, הנתונים נטענו מחדש. יש לדווח שוב");
+    //the courier's 409 of the same code carries no issuance number and is worded by the sync, not here
+    expect(errorMessage(axiosError({ statusCode: 409, message: "x", code: "revision_changed" }))).toBe("x");
+  });
+
   it("falls back to the server message when the code or its parts are unknown", () => {
     expect(errorMessage(axiosError({ statusCode: 409, message: "a courier with id number 1 already exists" }))).toBe("a courier with id number 1 already exists");
     expect(errorMessage(axiosError({ statusCode: 409, message: "x", code: "status_not_allowed", status: "weird", action: "assign" }))).toBe("x");
