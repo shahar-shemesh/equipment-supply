@@ -5,10 +5,10 @@ import { AttemptOutcome, IssuanceStatus, Priority, RecipientType, ReportSyncStat
 import { compareTasksForBoard, groupByAddress } from "../../../../shared/@utils";
 import { OTHER_SCOPE, PNG, SCOPE, courierUser, failedForm, fullForm, makeTask, otherUser, partialForm, snapshot } from "../../test/fixtures";
 import { DB_NAME, closeDb, openCourierDb } from "./db";
-import { closeChannel, deleteDraft, getDraft, getReport, listReports, lookupLocal, nothingDelivered, otherScopesWithPendingWork, putDraft, readBoard, readPendingIds, readTask, refresh, retryReport, requeueAuth, submitReport, updateReportSync, validateReportForm } from "./store";
+import { cacheTaskDetail, clearForeignScopes, clearSyncedData, closeChannel, deleteDraft, getDraft, getReport, listReports, lookupLocal, nothingDelivered, otherScopesWithPendingWork, putDraft, readBoard, readPendingIds, readTask, refresh, retryReport, requeueAuth, submitReport, updateReportSync, validateReportForm } from "./store";
 import { resetSyncForTests } from "./sync";
 
-//the data layer against fake-indexeddb: partitioning, the overlay, drafts and the atomic submit
+//the data layer against fake-indexeddb: partitioning, the overlay, drafts, the atomic submit and the cleanup of a scope
 
 beforeEach(async () => {
   await closeDb();
@@ -405,5 +405,78 @@ describe("retry helpers", () => {
     expect((await getReport(SCOPE, r.operation_id)).sync.state).toBe(ReportSyncState.auth);
     expect(await requeueAuth(SCOPE, 7)).toBe(1);
     expect((await getReport(SCOPE, r.operation_id)).sync.state).toBe(ReportSyncState.queued);
+  });
+});
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//what leaves the device on logout and under another account: the server's copies only
+describe("clearSyncedData", () => {
+  it("deletes the snapshot, the details and the synced reports; keeps every other state, the draft and the meta row that names them", async () => {
+    const states = [ReportSyncState.synced, ReportSyncState.queued, ReportSyncState.syncing, ReportSyncState.auth, ReportSyncState.invalid, ReportSyncState.forbidden, ReportSyncState.conflict];
+    const tasks = states.map((_, i) => makeTask(i + 1));
+    await refresh(SCOPE, async () => snapshot([...tasks, makeTask(8)]));
+    await cacheTaskDetail(SCOPE, makeTask(1, { status: TaskStatus.done }));
+    for (let i = 0; i < states.length; i++) {
+      const r = await submitReport(SCOPE, courierUser, tasks[i], fullForm(tasks[i]));
+      await updateReportSync(SCOPE, r.operation_id, { state: states[i] });
+    }
+    await putDraft(SCOPE, 8, draft());
+
+    expect(await clearSyncedData(SCOPE)).toEqual({ reports: 6, drafts: 1 });
+    const db = await openCourierDb();
+    expect(await db.getAllFromIndex("tasks", "by_scope", SCOPE)).toEqual([]);
+    expect(await db.get("task_details", [SCOPE, 1])).toBeUndefined();
+    const kept = await listReports(SCOPE);
+    expect(kept.map((r) => r.sync.state)).toEqual(states.slice(1));
+    expect(kept.every((r) => r.payload.signature_png === PNG)).toBe(true);
+    expect((await getDraft(SCOPE, 8)).signature_strokes).toEqual([[{ x: 0.1, y: 0.2 }]]);
+    //the meta row still names the owner, but no longer claims a snapshot that is gone
+    expect(await db.get("meta", SCOPE)).toMatchObject({ username: "dan", display_name: "דן משנע", ready: false, refreshed_at: null, last_error: null });
+    expect((await readBoard(SCOPE)).ready).toBe(false);
+    expect(await otherScopesWithPendingWork()).toEqual([{ scope: SCOPE, username: "dan", display_name: "דן משנע", count: 3 }]);
+  });
+
+  it("deletes the meta row only when no report and no draft are left", async () => {
+    const t = makeTask(1);
+    await refresh(SCOPE, async () => snapshot([t]));
+    const r = await submitReport(SCOPE, courierUser, t, fullForm(t));
+    await updateReportSync(SCOPE, r.operation_id, { state: ReportSyncState.synced });
+    await putDraft(SCOPE, 2, draft());
+
+    //the draft alone keeps the row
+    expect(await clearSyncedData(SCOPE)).toEqual({ reports: 0, drafts: 1 });
+    const db = await openCourierDb();
+    expect(await db.get("meta", SCOPE)).toBeTruthy();
+    expect(await listReports(SCOPE)).toEqual([]);
+
+    await deleteDraft(SCOPE, 2);
+    expect(await clearSyncedData(SCOPE)).toEqual({ reports: 0, drafts: 0 });
+    expect(await db.get("meta", SCOPE)).toBeUndefined();
+    expect(await otherScopesWithPendingWork()).toEqual([]);
+
+    //a scope that never stored anything is not an error, a missing scope is
+    expect(await clearSyncedData(OTHER_SCOPE)).toEqual({ reports: 0, drafts: 0 });
+    await expect(clearSyncedData(null as any)).rejects.toThrow(/scope/);
+  });
+
+  it("clearForeignScopes sweeps every other account and leaves the current one alone", async () => {
+    const t1 = makeTask(1);
+    const t2 = makeTask(2);
+    const t3 = makeTask(3);
+    await refresh(SCOPE, async () => snapshot([t1]));
+    await refresh(OTHER_SCOPE, async () => snapshot([t2, t3]));
+    const mine = await submitReport(SCOPE, courierUser, t1, fullForm(t1));
+    await updateReportSync(SCOPE, mine.operation_id, { state: ReportSyncState.synced });
+    const theirsTaken = await submitReport(OTHER_SCOPE, otherUser, t2, fullForm(t2));
+    await updateReportSync(OTHER_SCOPE, theirsTaken.operation_id, { state: ReportSyncState.synced });
+    const theirsQueued = await submitReport(OTHER_SCOPE, otherUser, t3, fullForm(t3));
+
+    await clearForeignScopes(SCOPE);
+    expect((await readBoard(SCOPE)).rows.map((r) => r.id)).toEqual([1]);
+    expect((await listReports(SCOPE)).map((r) => r.sync.state)).toEqual([ReportSyncState.synced]);
+    expect((await readBoard(OTHER_SCOPE)).rows).toEqual([]);
+    expect((await listReports(OTHER_SCOPE)).map((r) => r.operation_id)).toEqual([theirsQueued.operation_id]);
+    expect(await otherScopesWithPendingWork(SCOPE)).toEqual([{ scope: OTHER_SCOPE, username: "gal", display_name: "גל משנע", count: 1 }]);
   });
 });

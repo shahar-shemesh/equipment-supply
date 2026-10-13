@@ -12,7 +12,7 @@ import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 
 import { useAuth } from "../../utils/auth";
 import { isSecureContext, scopeOf } from "../offline/identity";
-import { refresh } from "../offline/store";
+import { clearSyncedData, refresh } from "../offline/store";
 import { stopSync } from "../offline/sync";
 import { useBoard, useOtherAccountsWork, useSyncStatus } from "../offline/useCourierData";
 import { PendingReportsDialog } from "./PendingReportsDialog";
@@ -40,11 +40,14 @@ export function SyncStatusBar() {
     setRefreshing(false);
   }
 
-  //back to the login page with the queue untouched: the worker stops first so no old result lands in the next session,
-  //logout clears localStorage only (indexeddb keeps the reports). a plain link would bounce, LoginPage redirects a logged in user
-  function reauth() {
+  //back to the login page with the queue untouched, in the same order as the logout button: the worker stops first so
+  //no old result lands in the next session, the session ends (the login page says it expired, which is why the chip was
+  //there), then the server's copies of this account leave the device while the queue, the only copy, stays. a plain
+  //link would bounce, LoginPage redirects a logged in user
+  async function reauth() {
     stopSync();
-    logout();
+    logout({ reason: "expired" });
+    if (scope) await clearSyncedData(scope).catch(() => {});
     navigate("/login");
   }
 

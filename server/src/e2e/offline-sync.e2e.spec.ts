@@ -2,6 +2,7 @@ import './setup-env';
 
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { JwtService } from '@nestjs/jwt';
 import { DataSource } from 'typeorm';
 import { Client } from 'pg';
 import request from 'supertest';
@@ -402,6 +403,30 @@ describe('legacy request without an operation id', () => {
         expect(again.status).toBe(409);
         expect(again.body).toEqual({ statusCode: 409, message: 'task already closed', code: ReportConflictCode.task_closed });
         expect(await state(f.issuance.id)).toEqual({ status: IssuanceStatus.delivered, tasks: [TaskStatus.done], pending: 0, attempts: 1, operations: 0, revision: 2 });
+    });
+});
+
+describe('an expired token', () => {
+    it('is a 401 that writes nothing; the same operation id under a fresh token is a first send, then a replay', async () => {
+        const f = await fixture();
+        //signed by the app's own service with the app's secret, a minute in the past: what a tablet holds after a shift
+        const payload = { sub: f.courierUser.id, username: 'c', display_name: 'courier', role: UserRole.courier, courier_id: f.courier.id };
+        const expired = app.get(JwtService).sign(payload, { expiresIn: -60 });
+        const body = { ...allDelivered(f), operation_id: OP_A, issuance_revision: 1 };
+
+        const refused = await post(`/api/delivery/tasks/${f.task.id}/attempts`, expired, body);
+        expect(refused.status).toBe(401);
+        expect(await state(f.issuance.id)).toEqual({ status: IssuanceStatus.assigned, tasks: [TaskStatus.pending], pending: 1, attempts: 0, operations: 0, revision: 1 });
+
+        //the courier signs in again and the worker resends the same operation id: not a replay of anything, the 401
+        //left no receipt behind
+        const first = await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, body);
+        expect(first.status).toBe(201);
+        expect(first.body.replayed).toBeUndefined();
+        const again = await post(`/api/delivery/tasks/${f.task.id}/attempts`, f.courierToken, body);
+        expect(again.status).toBe(201);
+        expect(again.body).toEqual({ ...first.body, replayed: true });
+        expect(await state(f.issuance.id)).toEqual({ status: IssuanceStatus.delivered, tasks: [TaskStatus.done], pending: 0, attempts: 1, operations: 1, revision: 2 });
     });
 });
 

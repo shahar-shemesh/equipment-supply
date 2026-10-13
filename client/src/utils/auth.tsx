@@ -1,14 +1,15 @@
 import { createContext, useContext, useEffect, useState } from "react";
 
 import { IUser, UserRole } from "../../../shared/@core";
-import { post, TOKEN_KEY, USER_KEY } from "./service";
+import { clearSession, post, SessionEnd, TOKEN_KEY, USER_KEY } from "./service";
+import { watchTokenExpiry } from "../courier/offline/identity";
 
 //dev-local auth only: username + password against the seeded accounts. the token is a plain jwt in localStorage.
 //when the production identity provider is decided this file is the place that changes on the client side
 type AuthCtx = {
   user: IUser | null;
   login: (username: string, password: string) => Promise<IUser>;
-  logout: () => void;
+  logout: (end?: SessionEnd) => void;
 };
 
 const Ctx = createContext<AuthCtx>(null);
@@ -37,6 +38,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  //the client side end of the 12 hour token: at exp, or on the first focus after it, the session is gone without a
+  //request and the login page says so. no cleanup here (this provider has no scope and the manager has no database):
+  //the courier layout unmounts through RequireRole and stops its worker, the same path as a logout made in another tab,
+  //and the next courier start sweeps what the server already holds
+  useEffect(() => {
+    if (!user) return;
+    return watchTokenExpiry(() => logout({ reason: "expired" }));
+  }, [user]);
+
   async function login(username: string, password: string) {
     const res = await post("/auth/login", { username, password });
     const u = normalizeUser(res.user);
@@ -46,9 +56,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return u;
   }
 
-  function logout() {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
+  //`end` is the note for the login page (what was sent before a logout, or that the token expired)
+  function logout(end?: SessionEnd) {
+    clearSession(end);
     setUser(null);
   }
 

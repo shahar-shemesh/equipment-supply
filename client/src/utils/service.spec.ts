@@ -2,10 +2,10 @@ import { beforeAll, describe, expect, it } from "vitest";
 import i18n from "i18next";
 
 import Translation from "../../../shared/i18n";
-import { errorMessage } from "./service";
+import { clearSession, errorMessage, takeSessionEnd, TOKEN_KEY, USER_KEY } from "./service";
 
-//the wording of a server error on the board. the 409 of the transition table comes with its parts and is said in hebrew,
-//everything else is the server's message as it was
+//the wording of a server error on the board (the 409 of the transition table comes with its parts and is said in hebrew,
+//everything else is the server's message as it was), and the note a session leaves for the login page
 
 beforeAll(async () => {
   await i18n.init(Translation as any);
@@ -41,5 +41,28 @@ describe("errorMessage", () => {
     expect(errorMessage(axiosError({ statusCode: 400, message: ["a", "b"] }, 400))).toBe("a, b");
     expect(errorMessage({ message: "Network Error" })).toBe("Network Error");
     expect(errorMessage({})).toBe("שגיאה לא ידועה");
+  });
+});
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+describe("clearSession / takeSessionEnd", () => {
+  it("removes both keys and leaves a note the login page reads once", () => {
+    localStorage.setItem(TOKEN_KEY, "t");
+    localStorage.setItem(USER_KEY, "{}");
+    clearSession({ reason: "logout", sent: 2 });
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
+    expect(localStorage.getItem(USER_KEY)).toBeNull();
+    expect(takeSessionEnd()).toEqual({ reason: "logout", sent: 2 });
+    expect(takeSessionEnd()).toBeNull();
+
+    //an end without a note drops a stale one, and junk in storage reads as no note
+    clearSession({ reason: "expired" });
+    clearSession();
+    expect(takeSessionEnd()).toBeNull();
+    sessionStorage.setItem("es_session_end", "{nope");
+    expect(takeSessionEnd()).toBeNull();
+    sessionStorage.setItem("es_session_end", JSON.stringify({ reason: "other" }));
+    expect(takeSessionEnd()).toBeNull();
   });
 });

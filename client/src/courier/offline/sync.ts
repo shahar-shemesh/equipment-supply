@@ -3,7 +3,7 @@ import axios from "axios";
 import { AttemptOutcome, ConflictReviewStatus, EvidenceUploadState, IAttemptResult, IConflictReceipt, IConflictStatus, ReportConflictCode, ReportSyncState } from "../../../../shared/@core";
 import { currentToken, decodeJwt, tokenIsFresh } from "./identity";
 import { LocalReport } from "./db";
-import { clearNetworkBackoff, closeChannel, evidenceDue, evidenceOf, listReports, markReportsAuth, needsAttention, postKick, releaseSyncLease, requeueAuth, subscribe, takeSyncLease, updateReportEvidence, updateReportSync, emit } from "./store";
+import { clearForeignScopes, clearNetworkBackoff, closeChannel, countReports, evidenceDue, evidenceOf, listReports, markReportsAuth, needsAttention, postKick, releaseSyncLease, requeueAuth, retryAll, subscribe, takeSyncLease, updateReportEvidence, updateReportSync, emit } from "./store";
 
 //the one worker that sends queued reports. module level, one scope at a time: startSync(scope) after login, stopSync()
 //on logout. a pass takes the cross tab lock, sends every due report by seq, releases the lock. nothing runs while the
@@ -29,6 +29,8 @@ export type Transport = {
 };
 export type SyncDeps = { transport?: Transport; now?: () => number; random?: () => number; afterSynced?: (scope: string) => void };
 export type KickReason = "enqueue" | "retry" | "online" | "visible" | "focus" | "channel" | "timer" | "start";
+//what the pass before a logout achieved: `sent` of the rows that were pending when it started, and what is still on the device
+export type FlushResult = { sent: number; pending: number; attention: number };
 
 const REQUEST_TIMEOUT_MS = 20_000;
 const TIMER_MS = 60_000;
@@ -37,6 +39,7 @@ const BACKOFF_BASE_MS = 30_000;
 const BACKOFF_MAX_MS = 15 * 60_000;
 const RETRYABLE = [408, 425, 429];
 const RECONNECT_REASONS: KickReason[] = ["retry", "online", "visible", "focus"];
+const PENDING_STATES = [ReportSyncState.queued, ReportSyncState.syncing, ReportSyncState.auth];
 
 //the worker's own axios instance: no response interceptor, so a 401 here never clears the session or navigates. the data
 //layer's background reads share it (offlineGet)
@@ -183,6 +186,11 @@ export async function startSync(s: string, d: SyncDeps = {}): Promise<void> {
     if (r.sync.state === ReportSyncState.conflict && evidenceOf(r).state === EvidenceUploadState.uploading) await updateReportEvidence(s, r.operation_id, { state: EvidenceUploadState.pending });
   }
   if (gen !== generation) return;
+  //another account used this device before (an expiry, a closed browser, a logout whose cleanup failed): its snapshot and
+  //acknowledged reports are not this courier's to keep, its pending reports and the meta row that names them stay for the
+  //login notice. a failed sweep does not hold the start back
+  await clearForeignScopes(s).catch(() => {});
+  if (gen !== generation) return;
   await requeueIfSameAccount(s);
   if (gen !== generation) return;
   //a start is a login or an app open, both worth one real request: a row parked by a network error keeps its backoff
@@ -260,6 +268,36 @@ export async function kickSync(reason: KickReason): Promise<void> {
     return passPromise || undefined;
   }
   return runPass();
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//the one bounded pass before a manual logout, so what the server can take now does not wait for the next login of the
+//same account: every retryable row goes out at once (retryAll drops the backoff and requeues the auth rows; the pass
+//itself still sends only under a fresh token of the same user, as always), and after `timeoutMs` the caller gets what is
+//left whatever the transport is still doing. a row the timeout caught in syncing stays so: stopSync drops its late
+//answer and the next start of the account resends the same operation id, which the server replays. never throws,
+//without a worker there is nothing to send
+export async function flushForLogout(timeoutMs = 30_000): Promise<FlushResult> {
+  const s = scope;
+  if (!s) return { sent: 0, pending: 0, attention: 0 };
+  try {
+    const before = new Set((await listReports(s)).filter((r) => PENDING_STATES.includes(r.sync.state)).map((r) => r.operation_id));
+    await retryAll(s);
+    let timer: any = null;
+    await Promise.race([
+      kickSync("retry"),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, timeoutMs);
+      }),
+    ]);
+    clearTimeout(timer);
+    const rows = await listReports(s);
+    return { sent: rows.filter((r) => before.has(r.operation_id) && r.sync.state === ReportSyncState.synced).length, ...(await countReports(s)) };
+  } catch (e) {
+    //a failed read or write: the worker's last counts are the best answer left
+    return { sent: 0, pending: status.pending, attention: status.attention };
+  }
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/
@@ -588,7 +626,7 @@ async function fetchReviews(gen: number, s: string) {
 
 async function refreshCounts(s: string) {
   const rows = await listReports(s);
-  const pending = rows.filter((r) => [ReportSyncState.queued, ReportSyncState.syncing, ReportSyncState.auth].includes(r.sync.state)).length;
+  const pending = rows.filter((r) => PENDING_STATES.includes(r.sync.state)).length;
   const attention = rows.filter(needsAttention).length;
   //a parked row keeps the flag up even when it was set before this pass; a fresh login clears it in requeueIfSameAccount
   const auth_required = status.auth_required || rows.some((r) => r.sync.state === ReportSyncState.auth);

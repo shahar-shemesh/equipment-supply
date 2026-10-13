@@ -1,15 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, Outlet, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Button, Dialog, DialogContent } from "@mui/material";
+import { Button, CircularProgress, Dialog, DialogContent } from "@mui/material";
 import LogoutIcon from "@mui/icons-material/Logout";
 
 import { Logo } from "../components/Logo";
 import { useAuth } from "../utils/auth";
 import { currentToken, scopeOf, tokenIsFresh } from "./offline/identity";
 import { requestPersistentStorage } from "./offline/storage";
-import { refresh, refreshIfStale } from "./offline/store";
-import { getSyncStatus, startSync, stopSync } from "./offline/sync";
+import { clearSyncedData, countReports, refresh, refreshIfStale } from "./offline/store";
+import { flushForLogout, getSyncStatus, startSync, stopSync } from "./offline/sync";
 import { SyncStatusBar } from "./components/SyncStatusBar";
 
 //tablet / phone shell for the courier: slim gradient header, the sync strip, content, and the fixed "לוח משלוחים" bar
@@ -19,7 +19,11 @@ export default function CourierLayout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const scope = scopeOf(user);
-  const [confirmCount, setConfirmCount] = useState(0);
+  //the confirm dialog: how many reports stay on the device, how many went out just now, whether a pass ran and fell short
+  const [confirm, setConfirm] = useState<{ count: number; sent: number; incomplete: boolean } | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  //bumped by cancel and by a scope change, so a pass that finishes after either changes nothing here
+  const flushRun = useRef(0);
 
   //one worker per account: start it, ask the browser to keep the storage, pull the snapshot when the server is
   //reachable, and pull it again (throttled) whenever the app comes back to the foreground or the network returns
@@ -39,6 +43,10 @@ export default function CourierLayout() {
     window.addEventListener("focus", stale);
     document.addEventListener("visibilitychange", visible);
     return () => {
+      //an account switch made in another tab lands here with the dialogs of the old account possibly open
+      flushRun.current++;
+      setSyncing(false);
+      setConfirm(null);
       stopSync();
       window.removeEventListener("online", stale);
       window.removeEventListener("focus", stale);
@@ -46,21 +54,43 @@ export default function CourierLayout() {
     };
   }, [scope]);
 
-  //reports that did not reach the server stay on the device (logout clears localStorage only), but the courier should
-  //know before leaving that they will only go out after the same account signs in again
-  function signOut() {
-    const s = getSyncStatus();
-    const n = s.pending + s.attention;
-    if (n > 0) {
-      setConfirmCount(n);
+  //reports that did not reach the server stay on the device under this account, so before leaving, what can go out now
+  //goes out: one bounded pass when the device is online under a fresh token, behind a dialog the courier may cancel
+  //(rejected reports ride too: their evidence goes up in the same pass). what is still to send after it, or everything
+  //without a pass (offline, token expired), asks for confirmation. the counts come from the database, not from the
+  //worker's status: a pass still running for the report just sent has not refreshed the status yet
+  async function signOut() {
+    if (!scope) return leave(0);
+    const run = ++flushRun.current;
+    const c = await countReports(scope).catch(() => ({ pending: getSyncStatus().pending, attention: getSyncStatus().attention }));
+    if (run !== flushRun.current) return;
+    if (c.pending + c.attention === 0) return leave(0);
+    if (navigator.onLine && tokenIsFresh(currentToken())) {
+      setSyncing(true);
+      const r = await flushForLogout();
+      if (run !== flushRun.current) return;
+      setSyncing(false);
+      if (r.pending + r.attention === 0) return leave(r.sent);
+      setConfirm({ count: r.pending + r.attention, sent: r.sent, incomplete: r.pending > 0 });
       return;
     }
-    leave();
+    setConfirm({ count: c.pending + c.attention, sent: 0, incomplete: false });
   }
 
-  function leave() {
+  //the pass itself goes on in the worker, only its result is no longer waited for
+  function cancelFlush() {
+    flushRun.current++;
+    setSyncing(false);
+  }
+
+  //the order matters: the worker stops first (a late answer is dropped), the session ends with the note for the login
+  //page (a refresh that starts from now on is refused before it fetches, there is no token), and only then the server's
+  //copies of this account leave the device while the reports it never acknowledged and the drafts stay. a failed
+  //cleanup is not a reason to stay: the next start sweeps
+  async function leave(sent: number) {
     stopSync();
-    logout();
+    logout({ reason: "logout", sent });
+    if (scope) await clearSyncedData(scope).catch(() => {});
     navigate("/login");
   }
 
@@ -85,12 +115,23 @@ export default function CourierLayout() {
         <Link to="/courier">{t("courier_footer")}</Link>
       </footer>
 
-      <Dialog open={confirmCount > 0} onClose={() => setConfirmCount(0)} maxWidth="xs" fullWidth>
+      <Dialog open={syncing} onClose={cancelFlush} maxWidth="xs" fullWidth>
         <DialogContent className="confirm-dialog">
-          <p>{t("logout_pending_work", { count: confirmCount })}</p>
+          <CircularProgress size={28} />
+          <p>{t("logout_syncing")}</p>
           <div className="confirm-dialog__actions">
-            <Button variant="contained" onClick={leave}>{t("logout")}</Button>
-            <Button variant="outlined" onClick={() => setConfirmCount(0)}>{t("cancel")}</Button>
+            <Button variant="outlined" onClick={cancelFlush}>{t("cancel")}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!confirm} onClose={() => setConfirm(null)} maxWidth="xs" fullWidth>
+        <DialogContent className="confirm-dialog">
+          {confirm?.incomplete && <p>{t("logout_sync_incomplete")}</p>}
+          <p>{t("logout_pending_work", { count: confirm?.count ?? 0 })}</p>
+          <div className="confirm-dialog__actions">
+            <Button variant="contained" onClick={() => leave(confirm?.sent ?? 0)}>{t("logout")}</Button>
+            <Button variant="outlined" onClick={() => setConfirm(null)}>{t("cancel")}</Button>
           </div>
         </DialogContent>
       </Dialog>

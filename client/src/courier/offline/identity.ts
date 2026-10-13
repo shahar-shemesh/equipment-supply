@@ -55,6 +55,51 @@ export function tokenIsFresh(token: string | null | undefined, now = Date.now())
 
 /*──────────────────────────────────────────────────────────────────────────*/
 
+//setTimeout folds anything above this to 0, a token that lasts weeks would fire at once instead of never
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+//ends the session on the client side when the stored token reaches exp, without a request: a timer for the moment itself
+//and a check on focus / visibilitychange for the tablet that slept through it (a sleeping device stalls its timers and
+//the clock jumps past exp when it wakes). `onExpired` runs at most once, the watcher disposes itself first; a token
+//without exp never fires. returns the dispose function. `now` is for tests
+export function watchTokenExpiry(onExpired: () => void, now: () => number = Date.now): () => void {
+  if (typeof decodeJwt(currentToken())?.exp !== "number") return () => {};
+  let fired = false;
+  let timer: any = null;
+
+  const dispose = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    window.removeEventListener("focus", check);
+    document.removeEventListener("visibilitychange", visible);
+  };
+  //the stored token is read again on every check: a login in another tab stores a fresh one meanwhile and that one is
+  //not expired (the AuthProvider rewires the watcher for it on its own). a check that finds the token still fresh arms
+  //the timer again for its exp (the clock was set back, or the clamp cut a long wait short), so the moment is never lost
+  function check() {
+    if (fired) return;
+    if (tokenIsFresh(currentToken(), now())) return arm();
+    fired = true;
+    dispose();
+    onExpired();
+  }
+  function visible() {
+    if (document.visibilityState === "visible") check();
+  }
+  function arm() {
+    if (timer) clearTimeout(timer);
+    const exp = decodeJwt(currentToken())?.exp;
+    timer = typeof exp === "number" ? setTimeout(check, Math.min(Math.max(exp * 1000 - now(), 0), MAX_TIMER_MS)) : null;
+  }
+
+  arm();
+  window.addEventListener("focus", check);
+  document.addEventListener("visibilitychange", visible);
+  return dispose;
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
 //service workers, crypto.randomUUID, web locks and navigator.storage.persist only exist on https or localhost. a tablet
 //opening http://<lan-ip>:5173 gets none of them, the status bar says so and the fallbacks below kick in
 export function isSecureContext(): boolean {

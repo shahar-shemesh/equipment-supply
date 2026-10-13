@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deleteDB } from "idb";
 
-import { AttemptOutcome, ConflictReviewStatus, EvidenceUploadState, ReportConflictCode, ReportSyncState } from "../../../../shared/@core";
-import { PNG, SCOPE, courierUser, deferred, fullForm, makeTask, setToken, snapshot, tick } from "../../test/fixtures";
+import { AttemptOutcome, ConflictReviewStatus, EvidenceUploadState, ReportConflictCode, ReportSyncState, TaskStatus } from "../../../../shared/@core";
+import { OTHER_SCOPE, PNG, SCOPE, courierUser, deferred, fullForm, makeTask, otherUser, setToken, snapshot, tick } from "../../test/fixtures";
 import { DB_NAME, closeDb, openCourierDb } from "./db";
-import { closeChannel, evidenceOf, getReport, listReports, readBoard, refresh, retryEvidence, retryReport, submitReport, updateReportSync } from "./store";
-import { SyncStatus, Transport, getSyncStatus, kickSync, resetSyncForTests, startSync, stopSync, subscribeSync } from "./sync";
+import { cacheTaskDetail, closeChannel, evidenceOf, getReport, listReports, otherScopesWithPendingWork, readBoard, readTask, refresh, retryEvidence, retryReport, submitReport, updateReportSync } from "./store";
+import { SyncStatus, Transport, flushForLogout, getSyncStatus, kickSync, resetSyncForTests, startSync, stopSync, subscribeSync } from "./sync";
 
-//the worker against a fake transport: what goes out, how every answer is classified, what a reconnect and a re-login do
+//the worker against a fake transport: what goes out, how every answer is classified, what a reconnect, a re-login, a
+//logout and another account's login do
 
 const T = Date.parse("2026-09-28T10:00:00.000Z");
 const now = () => T;
@@ -545,5 +546,142 @@ describe("evidence of rejected reports", () => {
     expect(r.ack).toMatchObject({ attempt_id: 77, outcome: AttemptOutcome.delivered });
     expect(evidenceOf(r).state).toBe(EvidenceUploadState.none);
     expect(getSyncStatus()).toMatchObject({ pending: 0, attention: 0 });
+  });
+});
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//the one bounded pass before a logout. every case starts with rows backed off by a network failure: the kind of wait a
+//logout must not sit through
+describe("flush before logout", () => {
+  const down = () => new Error("Network Error");
+
+  it("sends everything that is waiting at once and counts what went out", async () => {
+    const { reports } = await seed([1, 2]);
+    const { post, transport } = fakeTransport([down(), down()]);
+    await startSync(SCOPE, { transport, now, random: () => 0 });
+    expect(getSyncStatus()).toMatchObject({ pending: 2, reachable: false });
+
+    expect(await flushForLogout(5_000)).toEqual({ sent: 2, pending: 0, attention: 0 });
+    expect(post).toHaveBeenCalledTimes(4);
+    expect(post.mock.calls.slice(2).map((c) => c[1].operation_id)).toEqual(reports.map((r) => r.operation_id));
+    expect((await listReports(SCOPE)).map((r) => r.sync.state)).toEqual([ReportSyncState.synced, ReportSyncState.synced]);
+    expect(getSyncStatus()).toMatchObject({ pending: 0, running: false, reachable: true });
+  });
+
+  it("a 5xx on one report keeps it queued and says so, the other one counts as sent", async () => {
+    await seed([1, 2]);
+    const { post, transport } = fakeTransport([down(), down(), 201, 500]);
+    await startSync(SCOPE, { transport, now, random: () => 0 });
+
+    expect(await flushForLogout(5_000)).toEqual({ sent: 1, pending: 1, attention: 0 });
+    expect(post).toHaveBeenCalledTimes(4);
+    const [a, b] = await listReports(SCOPE);
+    expect(a.sync.state).toBe(ReportSyncState.synced);
+    expect(b.sync).toMatchObject({ state: ReportSyncState.queued, http_status: 500, tries: 1 });
+    expect(b.payload.signature_png).toBe(PNG);
+  });
+
+  it("a server that stays unreachable sends nothing and leaves every row queued", async () => {
+    await seed([1, 2]);
+    const { post, transport } = fakeTransport([down(), down(), down(), down()]);
+    await startSync(SCOPE, { transport, now, random: () => 0 });
+
+    expect(await flushForLogout(5_000)).toEqual({ sent: 0, pending: 2, attention: 0 });
+    expect(post).toHaveBeenCalledTimes(4);
+    expect((await listReports(SCOPE)).every((r) => r.sync.state === ReportSyncState.queued && r.sync.http_status === null)).toBe(true);
+    expect(getSyncStatus().reachable).toBe(false);
+  });
+
+  it("an expired token sends nothing: the rows go back to auth without a request, and no worker means nothing to do", async () => {
+    const { reports } = await seed([1]);
+    setToken({ sub: 7, exp: Math.floor(T / 1000) - 10 });
+    const { post, transport } = fakeTransport();
+    await startSync(SCOPE, { transport, now, random: () => 0 });
+
+    expect(await flushForLogout(5_000)).toEqual({ sent: 0, pending: 1, attention: 0 });
+    expect(post).not.toHaveBeenCalled();
+    expect((await getReport(SCOPE, reports[0].operation_id)).sync.state).toBe(ReportSyncState.auth);
+
+    stopSync();
+    expect(await flushForLogout(5_000)).toEqual({ sent: 0, pending: 0, attention: 0 });
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("a request that outlives the timeout is left in syncing, stopSync drops its answer and the next start resends the same operation id", async () => {
+    const { reports } = await seed([1]);
+    const hold = deferred<any>();
+    const { post, transport } = fakeTransport([down(), () => hold.promise]);
+    await startSync(SCOPE, { transport, now, random: () => 0 });
+
+    expect(await flushForLogout(50)).toEqual({ sent: 0, pending: 1, attention: 0 });
+    expect(post).toHaveBeenCalledTimes(2);
+    expect((await getReport(SCOPE, reports[0].operation_id)).sync.state).toBe(ReportSyncState.syncing);
+
+    //the logout goes on: the worker stops, the late 201 lands nowhere
+    stopSync();
+    hold.resolve(ok(1));
+    await tick(20);
+    const r = await getReport(SCOPE, reports[0].operation_id);
+    expect(r.sync.state).toBe(ReportSyncState.syncing);
+    expect(r.ack).toBeNull();
+
+    //the same account signs in again: syncing is requeued and the SAME id goes out, the server replays it
+    await startSync(SCOPE, { transport, now, random: () => 0 });
+    expect(post).toHaveBeenCalledTimes(3);
+    expect(post.mock.calls[2][1].operation_id).toBe(reports[0].operation_id);
+    expect((await getReport(SCOPE, reports[0].operation_id)).sync.state).toBe(ReportSyncState.synced);
+  });
+
+  it("tapped while a pass is running it waits for that pass and the re-run it folds into, and counts the row in flight", async () => {
+    await seed([1, 2]);
+    const hold = deferred<any>();
+    const { post, transport } = fakeTransport([() => hold.promise]);
+    const started = startSync(SCOPE, { transport, now, random: () => 0 });
+    await vi.waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+
+    //the first row is in flight, the second waits behind it: the flush must not answer before either is decided
+    let result: any = null;
+    const flushed = flushForLogout(5_000).then((r) => (result = r));
+    await tick(30);
+    expect(result).toBeNull();
+    expect(post).toHaveBeenCalledTimes(1);
+
+    hold.resolve(ok(1));
+    await flushed;
+    await started;
+    expect(result).toEqual({ sent: 2, pending: 0, attention: 0 });
+    expect(post).toHaveBeenCalledTimes(2);
+    expect((await listReports(SCOPE)).map((r) => r.sync.state)).toEqual([ReportSyncState.synced, ReportSyncState.synced]);
+  });
+});
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+describe("another account on the same device", () => {
+  it("a start sweeps the other account's snapshot and acknowledged reports, keeps its queued row and the login notice, and sends nothing of it", async () => {
+    //account B used the tablet before: a snapshot, a cached detail, one report the server took, one still queued
+    const b1 = makeTask(1, { revision: 4 });
+    const b2 = makeTask(2, { revision: 4 });
+    await refresh(OTHER_SCOPE, async () => snapshot([b1, b2]));
+    await cacheTaskDetail(OTHER_SCOPE, makeTask(1, { status: TaskStatus.done }));
+    const taken = await submitReport(OTHER_SCOPE, otherUser, b1, fullForm(b1));
+    await updateReportSync(OTHER_SCOPE, taken.operation_id, { state: ReportSyncState.synced });
+    const queued = await submitReport(OTHER_SCOPE, otherUser, b2, fullForm(b2));
+
+    //account A signs in
+    const { reports } = await seed([3]);
+    const { post, calls, transport } = fakeTransport();
+    await startSync(SCOPE, { transport, now, random: () => 0 });
+
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(calls[0].body.operation_id).toBe(reports[0].operation_id);
+    expect((await readBoard(OTHER_SCOPE)).rows).toEqual([]);
+    expect((await readTask(OTHER_SCOPE, 1)).task).toBeNull();
+    expect((await listReports(OTHER_SCOPE)).map((r) => [r.operation_id, r.sync.state])).toEqual([[queued.operation_id, ReportSyncState.queued]]);
+    expect(await otherScopesWithPendingWork(SCOPE)).toEqual([{ scope: OTHER_SCOPE, username: "gal", display_name: "גל משנע", count: 1 }]);
+    //A's own rows are untouched
+    expect((await readBoard(SCOPE)).rows.map((r) => r.id)).toEqual([3]);
+    expect((await getReport(SCOPE, reports[0].operation_id)).sync.state).toBe(ReportSyncState.synced);
   });
 });

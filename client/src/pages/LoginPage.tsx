@@ -5,7 +5,7 @@ import { Alert, Button, TextField } from "@mui/material";
 
 import { Logo } from "../components/Logo";
 import { homeOf, useAuth } from "../utils/auth";
-import { get } from "../utils/service";
+import { get, SessionEnd, takeSessionEnd } from "../utils/service";
 import { useOtherAccountsWork } from "../courier/offline/useCourierData";
 
 export default function LoginPage() {
@@ -21,10 +21,17 @@ export default function LoginPage() {
   const [online, setOnline] = useState(navigator.onLine);
   //every account on this device with reports still waiting to go out, whoever signs in next should know
   const { data: pendingWork } = useOtherAccountsWork(null);
+  //why the last session ended (clearSession wrote the note), consumed once so a reload of this page does not repeat it
+  const [sessionEnd, setSessionEnd] = useState<SessionEnd | null>(null);
 
   //the seeded accounts, only returned by the server in dev-local
   useEffect(() => {
     get("/auth/dev-accounts").then(setAccounts).catch(() => setAccounts([]));
+  }, []);
+
+  useEffect(() => {
+    const end = takeSessionEnd();
+    if (end) setSessionEnd(end);
   }, []);
 
   useEffect(() => {
@@ -68,6 +75,12 @@ export default function LoginPage() {
         <h1>{t("login_title")}</h1>
 
         {!online && <Alert severity="warning">{t("login_offline")}</Alert>}
+        {sessionEnd?.reason === "expired" && <Alert severity="warning">{t("session_expired")}</Alert>}
+        {/* what went out before the logout; what stayed behind, the pending notice below says (rejected reports are not
+            in it: they wait in the device's list for the same account, nothing to send) */}
+        {sessionEnd?.reason === "logout" && (sessionEnd.sent ?? 0) > 0 && (
+          <Alert severity="success">{t(sessionEnd.sent === 1 ? "logout_synced_one" : "logout_synced_count", { count: sessionEnd.sent })}</Alert>
+        )}
         {pendingWork.map((w) => (
           <Alert key={w.scope} severity="info">{t(w.count === 1 ? "login_pending_work_one" : "login_pending_work", { count: w.count, name: w.display_name || w.username })}</Alert>
         ))}

@@ -657,6 +657,62 @@ export async function otherScopesWithPendingWork(except?: string): Promise<Scope
 
 /*──────────────────────────────────────────────────────────────────────────*/
 
+export type ClearResult = { reports: number; drafts: number };
+
+//what a logout and a start under another account remove: the server's copies of the scope (the snapshot, the cached
+//details, the reports the server acknowledged). a report in any other state and a draft are the only copy there is and
+//stay; the meta row stays with them to name their owner for the login notice, its snapshot fields back to "never
+//downloaded" since the rows it described are gone, and is deleted once nothing is left. one transaction, never clear()
+//(other scopes live in the same stores). a refresh still in flight for the scope (the one a sync pass starts after it
+//delivered) is waited for first, or its snapshot would land after the delete. nothing is emitted: the screens of the
+//scope are leaving and the other tabs with it. resolves with what stayed
+export async function clearSyncedData(scope: string): Promise<ClearResult> {
+  assertScope(scope);
+  await inFlight.get(scope)?.catch(() => {});
+  return writeTx(["tasks", "task_details", "reports", "drafts", "meta"], async (tx) => {
+    await tx.objectStore("tasks").delete(scopeRange(scope));
+    await tx.objectStore("task_details").delete(scopeRange(scope));
+    const reports = tx.objectStore("reports");
+    let keptReports = 0;
+    for (const r of (await reports.index("by_scope").getAll(scope)) as LocalReport[]) {
+      if (r.sync.state === ReportSyncState.synced) await reports.delete([scope, r.operation_id]);
+      else keptReports++;
+    }
+    const drafts = (await tx.objectStore("drafts").getAllKeys(scopeRange(scope))).length;
+    const metaStore = tx.objectStore("meta");
+    if (!keptReports && !drafts) await metaStore.delete(scope);
+    else {
+      const meta: MetaRow | undefined = await metaStore.get(scope);
+      if (meta) await metaStore.put({ ...meta, refreshed_at: null, ready: false, last_error: null, sync_lease: null });
+    }
+    return { reports: keptReports, drafts };
+  });
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//the two numbers the strip and the logout decide by, read from the database: reports still to send (queued / syncing /
+//auth) and the ones someone has to look at. the worker's status carries the same pair but only refreshes it at the end
+//of a pass, so a decision taken while a pass runs reads the database instead
+export async function countReports(scope: string): Promise<{ pending: number; attention: number }> {
+  const rows = await listReports(scope);
+  return { pending: rows.filter((r) => PENDING_STATES.includes(r.sync.state)).length, attention: rows.filter(needsAttention).length };
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//every account on this device but `current` loses its server copies, so a courier never inherits another one's cache
+//(signatures, recipient id numbers). meta driven: a scope with anything to remove wrote its meta row on the refresh or
+//the submit that stored it
+export async function clearForeignScopes(current: string): Promise<void> {
+  assertScope(current);
+  const db = await openCourierDb();
+  const metas = (await db.getAll("meta")) as MetaRow[];
+  for (const m of metas) if (m.scope !== current) await clearSyncedData(m.scope);
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
 //the cross tab lock for browsers without web locks (plain http on a lan). one lease per scope in meta: taken when free,
 //expired or already ours. resolves true when this owner holds it now
 export async function takeSyncLease(scope: string, owner: string, ttlMs: number, now: number): Promise<boolean> {
