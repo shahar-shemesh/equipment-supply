@@ -72,7 +72,7 @@ const OTHER_SIGNATURE = 'data:image/png;base64,' + Buffer.from([0x89, 0x50, 0x4e
 
 //one manager, two couriers with a login, each with one assigned issuance. the first issuance has two lines
 async function fixture(): Promise<Fixture> {
-    await ds.query('TRUNCATE TABLE audit_log, delivery_conflicts, delivery_operations, delivery_attempt_items, delivery_attempts, delivery_tasks, issuance_items, issuances, couriers, users RESTART IDENTITY CASCADE');
+    await ds.query('TRUNCATE TABLE xml_outbox, audit_log, delivery_conflicts, delivery_operations, delivery_attempt_items, delivery_attempts, delivery_tasks, issuance_items, issuances, couriers, users RESTART IDENTITY CASCADE');
     const hash = await bcrypt.hash('1234', 4);
 
     await ds.getRepository(User).save({ username: 'm', password_hash: hash, display_name: 'manager', role: UserRole.manager });

@@ -6,6 +6,7 @@ import { AuditAction, AuditEntityType, IssuanceSortKey, IssuanceStatus, Priority
 import { Issuance, IssuanceItem, DeliveryTask, DeliveryAttempt, Courier } from '../entities';
 import { AuditService } from '../audit/audit.service';
 import { changesBetween, snapshot } from '../audit/audit.diff';
+import { XmlOutboxService } from '../xml-export/xml-outbox.service';
 import { handedOver, outcomeOf, validateItemAnswers, validateRecipient, validateSignature } from '../delivery/attempt.validation';
 import { assertCanDo, editableStatuses } from './issuance.rules';
 
@@ -90,6 +91,7 @@ export class IssuancesService {
     @InjectRepository(DeliveryTask) private tasks: Repository<DeliveryTask>,
     @InjectRepository(Courier) private couriers: Repository<Courier>,
     private audit: AuditService,
+    private outbox: XmlOutboxService,
   ) {}
 
   // /api/issuances?status=&priority=&city=&customer=&courier_id=&date=&search=&sort=&order=&page=&page_size=
@@ -208,6 +210,9 @@ export class IssuancesService {
       //em.update and not save: the locked entity has no relations loaded and a save would null what it does not know
       await em.update(Issuance, id, { status: outcome as any, revision: locked.revision + 1, delivered_by_user_id: user.sub });
       await this.audit.record(em, { actor: user, action: AuditAction.issuance_self_pickup_report, entity_type: AuditEntityType.issuance, entity_id: id, issuance_id: id, details: { task_id: task.id, attempt_id: attempt.id, outcome, items_delivered: answers.filter((a) => a.delivered).length, items_total: answers.length, revision: locked.revision + 1 } });
+      //the xml export row, after the audit row, on the same transaction (xml-export/). the snapshot is the state after
+      //the update above, which the locked entity does not reflect
+      await this.outbox.record(em, { issuance: { ...locked, revision: locked.revision + 1 }, from: locked.status, to: outcome as any, actor: user, trigger: AuditAction.issuance_self_pickup_report, details: { task_id: task.id, attempt_id: attempt.id, items_delivered: answers.filter((a) => a.delivered).length, items_total: answers.length } });
       this.logger.log(`issuance ${locked.sap_number} handed over at the warehouse (${outcome}) by user ${user?.sub}, task ${task.id}`);
     });
 
@@ -261,6 +266,9 @@ export class IssuancesService {
       const changes = changesBetween(before, issuance, EDIT_FIELDS);
       if (wantsSelfPickup) {
         await this.audit.record(em, { actor: user, action: AuditAction.issuance_self_pickup, entity_type: AuditEntityType.issuance, entity_id: id, issuance_id: id, details: { from_status: fromStatus, ...(changes ? { changes } : {}) } });
+        //the xml export row, after the audit row, on the same transaction (xml-export/). a plain edit moves no status
+        //and writes none
+        await this.outbox.record(em, { issuance, from: fromStatus, to: IssuanceStatus.self_pickup, actor: user, trigger: AuditAction.issuance_self_pickup });
       } else if (changes) {
         await this.audit.record(em, { actor: user, action: AuditAction.issuance_edit, entity_type: AuditEntityType.issuance, entity_id: id, issuance_id: id, details: { changes } });
       }
@@ -346,6 +354,9 @@ export class IssuancesService {
         if (scheduledDate) issuance.delivery_date = scheduledDate;
         await em.save(issuance);
         await this.audit.record(em, { actor: user, action: AuditAction.issuance_assign, entity_type: AuditEntityType.issuance, entity_id: id, issuance_id: id, batch_id: batchId, details: { courier_id: courierId, task_id: task.id, scheduled_date: task.scheduled_date, from_status: fromStatus } });
+        //the xml export row, after the audit row, on the same transaction (xml-export/). a reassign of an assigned
+        //issuance moves no status and the service writes none for it (the from === to guard is there, not here)
+        await this.outbox.record(em, { issuance, from: fromStatus, to: IssuanceStatus.assigned, actor: user, trigger: AuditAction.issuance_assign, details: { courier_id: courierId, task_id: task.id, scheduled_date: task.scheduled_date } });
       }
     });
 
@@ -373,6 +384,8 @@ export class IssuancesService {
       await cancelOpenTasks(em, id);
       await em.save(issuance);
       await this.audit.record(em, { actor: user, action: AuditAction.issuance_delete, entity_type: AuditEntityType.issuance, entity_id: id, issuance_id: id, details: { reason: issuance.delete_reason, from_status: fromStatus } });
+      //the xml export row, after the audit row, on the same transaction (xml-export/)
+      await this.outbox.record(em, { issuance, from: fromStatus, to: IssuanceStatus.deleted, actor: user, trigger: AuditAction.issuance_delete, details: { reason: issuance.delete_reason } });
 
       this.logger.warn(`issuance ${issuance.sap_number} deleted by user ${user?.sub}, reason: ${issuance.delete_reason || '-'}`);
     });

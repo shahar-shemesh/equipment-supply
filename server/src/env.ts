@@ -1,3 +1,5 @@
+import * as path from 'path';
+
 //everything that decides "is this a developer's machine or a real environment" is here, so the dev-only switches
 //(dev accounts, default jwt secret, destructive seed, schema sync) all read the same answer.
 //ENVIRONMENT=LOCAL is an explicit opt in. a deploy that forgot its env file lands on the safe side
@@ -53,12 +55,84 @@ export function seedBulkCount() {
 
 /*──────────────────────────────────────────────────────────────────────────*/
 
+export type XmlExportConfig = {
+  enabled: boolean; //XML_EXPORT_ENABLED=true starts the worker. the outbox rows are written either way
+  storage: 'local' | 's3'; //XML_EXPORT_STORAGE, where the documents land. unset is s3 so every existing .env keeps working
+  localDir: string | null; //XML_EXPORT_LOCAL_DIR resolved to an absolute path, only with storage local
+  region: string | null; //AWS_REGION, the sdk reads the same variable
+  bucket: string | null; //XML_EXPORT_BUCKET
+  prefix: string; //XML_EXPORT_PREFIX, the folder inside the bucket, with its trailing slash, or empty for the root
+  pollMs: number; //XML_EXPORT_POLL_MS, the worker's tick
+  batch: number; //XML_EXPORT_BATCH, rows per tick
+  leaseMs: number; //XML_EXPORT_LEASE_MS, how long a claim belongs to its worker
+  maxAttempts: number; //XML_EXPORT_MAX_ATTEMPTS, failed after that many claims
+  endpoint: string | null; //XML_EXPORT_S3_ENDPOINT, path style, for MinIO or LocalStack on a laptop
+  kmsKeyId: string | null; //XML_EXPORT_KMS_KEY_ID, aws:kms with this key; without it the bucket's own AES256
+};
+
+//the one reader of the xml export switches (xml-export/). bucket and region are only required while the worker is on
+//with the s3 backend: a box that writes the outbox and exports nothing yet is a valid state (the backlog is exported
+//once the bucket exists), and the local backend needs neither. the numbers are checked whether or not the worker is
+//on, like SEED_BULK: a typo must not quietly run a different setting
+export function xmlExportConfig(): XmlExportConfig {
+  const enabled = process.env.XML_EXPORT_ENABLED === 'true';
+  const bucket = (process.env.XML_EXPORT_BUCKET ?? '').trim() || null;
+  const region = (process.env.AWS_REGION ?? '').trim() || null;
+
+  //the backend is chosen once at startup and never falls back: a failing bucket does not turn into a directory
+  const storageRaw = (process.env.XML_EXPORT_STORAGE ?? '').trim();
+  if (storageRaw !== '' && storageRaw !== 'local' && storageRaw !== 's3') throw new Error(`XML_EXPORT_STORAGE must be "local" or "s3" (unset means s3), got "${process.env.XML_EXPORT_STORAGE}"`);
+  const storage: 'local' | 's3' = storageRaw === 'local' ? 'local' : 's3';
+  //relative to the working directory of the server process, like every other relative path node resolves
+  const localDir = storage === 'local' ? path.resolve((process.env.XML_EXPORT_LOCAL_DIR ?? '').trim() || './exports/xml') : null;
+
+  const prefix = process.env.XML_EXPORT_PREFIX ?? 'issuance-status-changes/';
+  if (!/^[A-Za-z0-9._/-]*$/.test(prefix)) throw new Error(`XML_EXPORT_PREFIX may hold letters, digits, ".", "_", "-" and "/" only, got "${prefix}"`);
+  if (prefix && !prefix.endsWith('/')) throw new Error(`XML_EXPORT_PREFIX must end with "/" (or be empty for the bucket root), got "${prefix}"`);
+  //s3 keeps a leading slash, an empty segment or a ".." as a folder of that name: the objects would land where nobody looks
+  if (prefix.startsWith('/') || prefix.includes('//') || prefix.split('/').some((seg) => seg === '.' || seg === '..')) throw new Error(`XML_EXPORT_PREFIX must be a plain folder path (no leading "/", no empty, "." or ".." segment), got "${prefix}"`);
+
+  if (enabled && storage === 's3' && !bucket) throw new Error('XML_EXPORT_BUCKET is required when XML_EXPORT_ENABLED=true (unless XML_EXPORT_STORAGE=local)');
+  if (enabled && storage === 's3' && !region) throw new Error('AWS_REGION is required when XML_EXPORT_ENABLED=true (unless XML_EXPORT_STORAGE=local)');
+
+  return {
+    enabled,
+    storage,
+    localDir,
+    region,
+    bucket,
+    prefix,
+    pollMs: wholeNumber('XML_EXPORT_POLL_MS', 5000, 1000),
+    batch: wholeNumber('XML_EXPORT_BATCH', 20, 1),
+    leaseMs: wholeNumber('XML_EXPORT_LEASE_MS', 60000, 1000),
+    maxAttempts: wholeNumber('XML_EXPORT_MAX_ATTEMPTS', 20, 1),
+    endpoint: (process.env.XML_EXPORT_S3_ENDPOINT ?? '').trim() || null,
+    kmsKeyId: (process.env.XML_EXPORT_KMS_KEY_ID ?? '').trim() || null,
+  };
+}
+
+//unset or blank is the default, anything else must be a whole number at or above the floor and within int4: a timer
+//past 2^31-1 ms fires every millisecond in node, and the lease goes into the claim as an int
+const INT_MAX = 2147483647;
+
+function wholeNumber(name: string, fallback: number, min: number) {
+  const raw = (process.env[name] ?? '').trim();
+  if (raw === '') return fallback;
+  if (!/^\d+$/.test(raw)) throw new Error(`${name} must be a whole number, got "${process.env[name]}"`);
+  if (+raw < min) throw new Error(`${name} must be at least ${min}, got ${raw}`);
+  if (+raw > INT_MAX) throw new Error(`${name} must be at most ${INT_MAX}, got ${raw}`);
+  return +raw;
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
 //called once from main.ts before anything listens. throws on the combinations that must never run, warns on the ones
 //that are allowed but worth noticing in the log
 export function assertSafeConfig(logger: { log: (m: string) => void; warn: (m: string) => void }) {
   const strategy = process.env.AUTH_STRATEGY || 'dev-local';
 
   jwtSecret();
+  const xml = xmlExportConfig(); //throws with the variable's name when the worker is on without a bucket or a region
 
   if (strategy === 'dev-local' && !devAuthAllowed()) {
     throw new Error('AUTH_STRATEGY=dev-local outside ENVIRONMENT=LOCAL. set ALLOW_DEV_AUTH=true only for a test box with no real identity provider yet');
@@ -70,5 +144,10 @@ export function assertSafeConfig(logger: { log: (m: string) => void; warn: (m: s
     logger.warn('DB_SYNCHRONIZE is ignored outside LOCAL, the schema needs migrations');
   }
 
-  logger.log(`environment: ${isLocal() ? 'LOCAL' : process.env.ENVIRONMENT || '(unset)'}, auth: ${strategy}, schema sync: ${schemaSyncAllowed()}, seed allowed: ${destructiveSeedAllowed()}`);
+  logger.log(`environment: ${isLocal() ? 'LOCAL' : process.env.ENVIRONMENT || '(unset)'}, auth: ${strategy}, schema sync: ${schemaSyncAllowed()}, seed allowed: ${destructiveSeedAllowed()}, xml export: ${xml.enabled ? xmlExportTarget(xml) : 'off'}`);
+}
+
+//"local <dir>" or "s3 <bucket>/<prefix>", for the startup lines of main.ts and of the worker
+export function xmlExportTarget(cfg: XmlExportConfig) {
+  return cfg.storage === 'local' ? `local ${cfg.localDir}` : `s3 ${cfg.bucket}/${cfg.prefix}`;
 }

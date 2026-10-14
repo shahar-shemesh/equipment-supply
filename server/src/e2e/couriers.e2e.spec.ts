@@ -48,7 +48,7 @@ afterAll(async () => {
 
 //a manager and a courier login, nothing else. the couriers under test come in through the routes
 async function reset() {
-    await ds.query('TRUNCATE TABLE audit_log, delivery_conflicts, delivery_operations, delivery_attempt_items, delivery_attempts, delivery_tasks, issuance_items, issuances, couriers, users RESTART IDENTITY CASCADE');
+    await ds.query('TRUNCATE TABLE xml_outbox, audit_log, delivery_conflicts, delivery_operations, delivery_attempt_items, delivery_attempts, delivery_tasks, issuance_items, issuances, couriers, users RESTART IDENTITY CASCADE');
     const hash = await bcrypt.hash('1234', 4);
     await ds.getRepository(User).save({ username: 'm', password_hash: hash, display_name: 'manager', role: UserRole.manager });
     await ds.getRepository(User).save({ username: 'c', password_hash: hash, display_name: 'courier', role: UserRole.courier });

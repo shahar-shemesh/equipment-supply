@@ -27,6 +27,10 @@ async function bootstrap() {
   //vite proxies /api in dev, cors is for opening the courier screens from a tablet on the lan (vite --host)
   app.enableCors();
 
+  //SIGTERM and SIGINT run onModuleDestroy, where the xml export worker stops its timer and waits for the tick in flight
+  //(xml-export/xml-export.worker.ts). without this nest only does that on app.close(), which a real shutdown never calls
+  app.enableShutdownHooks();
+
   const port = process.env.PORT || 3000;
   await app.listen(port);
   logger.log(`NestJS is listening on port ${port}, auth strategy: ${process.env.AUTH_STRATEGY || 'dev-local'}`);

@@ -24,6 +24,8 @@ All routes are under `/api` and need `Authorization: Bearer <token>` except logi
 | `POST /conflicts/:id/review` | manager | `{ note, version }`: mark reviewed; 409 `review_conflict` with the existing review when another manager got there first |
 | `GET /delivery/lookup?number=` | courier | find my task by the printed number |
 | `GET /audit` | manager | the audit log as `IAuditPage { items, total }`, newest first; `?issuance_id=&actor_user_id=&action=&from=&to=&page=&size=` (`page` 1-based, `size` default 50 and at most 100, `from` / `to` an ISO date or date time read as UTC, `to` exclusive and a bare date covering its whole day); a value that is not what the parameter means is a 400, never an empty page |
+| `GET /xml-export` | manager | the xml export outbox as `IXmlExportOverview { counts, failed }`: `counts` by status plus `retry_waiting` (pending rows whose retry time is still ahead) and `lease_expired` (processing rows a worker left behind), and the failed rows (`IXmlExportEvent`, oldest first, at most 100) with their `last_error`; see [XML export](xml-export.md#investigating-and-retrying) |
+| `POST /xml-export/:id/retry` | manager | a failed row goes back to the queue (`pending`, `attempts` 0, lease and error cleared), answers the row as `IXmlExportEvent`, 201; 409 `{ statusCode: 409, message, code: 'not_failed', status }` for a row that is not failed, 404 for an unknown id, 400 for a value that is not a uuid; writes an `xml_export.retry` audit row |
 
 ## API contract changes
 
@@ -51,5 +53,10 @@ Made for the line removal, in `shared/@core.ts`:
 - `DELETE /issuances/:id/items/:itemId` is new, manager only, see the table above. Its own 409 is `{ statusCode: 409, message, code: 'last_item', sap_number }`; the status refusal is the usual `status_not_allowed` body with `action: 'remove_item'`. `IssuanceAction` in `shared/@rules.ts` gained `remove_item`, `AuditAction` gained `issuance.remove_item`, `IIssuanceItem` gained `removed_at` (null on every line a response lists; a removed line is returned in one place only, `GET /conflicts/:id`, whose issuance lists the lines as the refused report knew them, the removed ones with `removed_at` set, so the review can name the line in dispute).
 - `POST /delivery/tasks/:id/attempts` validates a report whose `issuance_revision` is behind the current one against the live lines plus the removed ones it names (not every removed line: a snapshot taken between two removals never knew the earlier one), so a report signed against the old line set reaches the lock and is answered as a replay or refused as 409 `revision_changed` with its evidence intact, instead of a 400 `unknown item`. A report at the current revision is validated against the live lines only as before. A report without a revision (no `operation_id`) is validated the same way and is also held, under the lock, to the revision it was validated against: a removal that committed in between is a 409 `revision_changed` there too.
 - `POST /issuances/:id/self-pickup/report` answers 409 `{ statusCode: 409, message, code: 'revision_changed', sap_number }` when the issuance revision moved between its validation and its lock (a line removed by another manager); the detail dialog reloads on it.
+
+Made for the xml export, in `shared/@core.ts`:
+
+- `GET /xml-export` and `POST /xml-export/:id/retry` are new, manager only, see the table above and [XML export](xml-export.md). The shared types are `XmlOutboxStatus`, `IXmlExportEvent` and `IXmlExportOverview`; `AuditAction` gained `xml_export.retry`.
+- No existing route changed: the five status writing routes (`POST /issuances/assign`, the self pickup move of `PATCH /issuances/:id`, `DELETE /issuances/:id`, `POST /issuances/:id/self-pickup/report`, `POST /delivery/tasks/:id/attempts`) write an `xml_outbox` row inside their transaction and answer exactly as before, same bodies and same status codes.
 
 Nothing else in the API changed.

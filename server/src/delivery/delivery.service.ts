@@ -6,6 +6,7 @@ import { AuditAction, AuditEntityType, IAttemptResult, IssuanceStatus, ReportCon
 import { normalizeSapNumber } from '../../../shared/@utils';
 import { DeliveryTask, DeliveryAttempt, Issuance, IssuanceItem, DeliveryOperation } from '../entities';
 import { AuditService } from '../audit/audit.service';
+import { XmlOutboxService } from '../xml-export/xml-outbox.service';
 import { lockIssuance } from '../issuances/issuances.service';
 import { handedOver, outcomeOf, validateItemAnswers, validateRecipient, validateSignature } from './attempt.validation';
 import { isOperationUniqueViolation, parseClientTime, payloadHash, validateIssuanceRevision, validateOperationId } from './operation';
@@ -30,6 +31,7 @@ export class DeliveryService {
     @InjectRepository(Issuance) private issuances: Repository<Issuance>,
     @InjectRepository(DeliveryOperation) private operations: Repository<DeliveryOperation>,
     private audit: AuditService,
+    private outbox: XmlOutboxService,
   ) {}
 
   // /api/delivery/tasks?tab=all|pending|done&search=
@@ -184,6 +186,10 @@ export class DeliveryService {
         //and the unique violation catch below never reaches it, so one operation has exactly one row. ids and counts only,
         //the signature stays in delivery_attempts
         await this.audit.record(em, { actor: user, action: AuditAction.delivery_report, entity_type: AuditEntityType.delivery_task, entity_id: task.id, issuance_id: task.issuance_id, details: { task_id: task.id, attempt_id: attempt.id, outcome, operation_id: operationId, items_delivered: answers.filter((a) => a.delivered).length, items_total: answers.length, revision: issuance.revision + 1 } });
+        //the xml export row, after the audit row, on the same transaction (xml-export/): the replay paths and the unique
+        //violation catch never reach it either, so one operation is one document. the snapshot is the state after the
+        //update above, which the locked entity does not reflect
+        await this.outbox.record(em, { issuance: { ...issuance, revision: issuance.revision + 1 }, from: issuance.status, to: outcome as any, actor: user, trigger: AuditAction.delivery_report, details: { task_id: task.id, attempt_id: attempt.id, courier_id: task.courier_id, operation_id: operationId, items_delivered: answers.filter((a) => a.delivered).length, items_total: answers.length } });
         return fresh;
       });
     } catch (e) {

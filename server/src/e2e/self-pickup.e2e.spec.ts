@@ -53,7 +53,7 @@ type Fixture = { issuance: Issuance; task: DeliveryTask; manager: User; courier:
 //one manager (a hebrew display name, so it cannot be confused with a courier row), one courier with a login, one
 //issuance with two lines assigned to that courier
 async function fixture(): Promise<Fixture> {
-    await ds.query('TRUNCATE TABLE audit_log, delivery_conflicts, delivery_operations, delivery_attempt_items, delivery_attempts, delivery_tasks, issuance_items, issuances, couriers, users RESTART IDENTITY CASCADE');
+    await ds.query('TRUNCATE TABLE xml_outbox, audit_log, delivery_conflicts, delivery_operations, delivery_attempt_items, delivery_attempts, delivery_tasks, issuance_items, issuances, couriers, users RESTART IDENTITY CASCADE');
     const hash = await bcrypt.hash('1234', 4);
 
     const manager = await ds.getRepository(User).save({ username: 'm', password_hash: hash, display_name: 'דנה המחסנאית', role: UserRole.manager });

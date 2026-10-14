@@ -53,7 +53,7 @@ const OP_B = 'c0ff11ce-0000-4000-8000-000000000002';
 
 //two managers, two couriers with a login, one issuance with two lines assigned to the first courier
 async function fixture(): Promise<Fixture> {
-    await ds.query('TRUNCATE TABLE audit_log, delivery_conflicts, delivery_operations, delivery_attempt_items, delivery_attempts, delivery_tasks, issuance_items, issuances, couriers, users RESTART IDENTITY CASCADE');
+    await ds.query('TRUNCATE TABLE xml_outbox, audit_log, delivery_conflicts, delivery_operations, delivery_attempt_items, delivery_attempts, delivery_tasks, issuance_items, issuances, couriers, users RESTART IDENTITY CASCADE');
     const hash = await bcrypt.hash('1234', 4);
 
     await ds.getRepository(User).save({ username: 'm', password_hash: hash, display_name: 'דנה', role: UserRole.manager });

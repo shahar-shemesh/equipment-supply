@@ -344,6 +344,7 @@ export enum AuditAction {
   auth_login = "auth.login",
   auth_login_failed = "auth.login_failed", //the one rejected request that is recorded
   system_seed = "system.seed",
+  xml_export_retry = "xml_export.retry", //a manager sent a failed xml export back to the queue
 }
 
 // one row of audit_log. the actor is copied at write time (no foreign key to users), so the row reads the same after a
@@ -367,4 +368,44 @@ export interface IAuditEntry {
 export interface IAuditPage {
   items: IAuditEntry[];
   total: number;
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+// the xml export (xml_outbox): one row per committed issuance status change, written inside the transaction of the change
+// like the audit row, and exported to S3 as one xml document by the worker in server/src/xml-export. the row is a
+// snapshot, everything the document needs is in it. at least once processing, one artifact per event: a row may be
+// claimed twice (a lease that expired), the object key is the same both times
+export enum XmlOutboxStatus {
+  pending = "pending", //waiting for the worker, or for next_retry_at after a transient failure
+  processing = "processing", //claimed by a worker until lease_until
+  completed = "completed", //the object is in the bucket
+  failed = "failed", //out of attempts, or a permanent error (the document could not be built, another object under the key); a manager retries it
+}
+
+// one row of xml_outbox as GET /api/xml-export shows it: the columns of the table, the payload itself stays inside
+export interface IXmlExportEvent {
+  id: string; //uuid, the EventId of the document
+  issuance_id: number;
+  sequence: number; //1, 2, 3... per issuance, in the order the changes committed
+  previous_status: IssuanceStatus;
+  new_status: IssuanceStatus;
+  trigger: AuditAction; //the action that moved the status
+  status: XmlOutboxStatus;
+  attempts: number;
+  next_retry_at: string;
+  created_at: string;
+  occurred_at: string;
+  lease_until: string | null;
+  processed_at: string | null;
+  s3_key: string | null;
+  content_sha256: string | null;
+  last_error: string | null; //"category: message", the last failure; cleared on completion
+}
+
+// GET /api/xml-export  -  the queue at a glance and the rows that need a manager. retry_waiting are the pending rows
+// whose next_retry_at is still ahead, lease_expired the processing rows a worker left behind (reclaimed on the next tick)
+export interface IXmlExportOverview {
+  counts: { pending: number; processing: number; completed: number; failed: number; retry_waiting: number; lease_expired: number };
+  failed: IXmlExportEvent[];
 }
