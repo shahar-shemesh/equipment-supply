@@ -10,7 +10,10 @@ import { AppModule } from '../app.module';
 import { tokenFor } from './auth-helper';
 import { AuthMode, IssuanceStatus, TaskStatus, UserRole } from '../../../shared/@core';
 import { User, Courier, Issuance, DeliveryTask } from '../entities';
+import { JwtService } from '@nestjs/jwt';
+
 import { AUTH_PROVIDER } from '../auth/auth.provider';
+import { jwtSecret } from '../env';
 import { CognitoAuthProvider } from '../auth/cognito/cognito-auth.provider';
 
 //the auth foundation against the same throwaway database as the other e2e specs (docker compose up -d first): the mock
@@ -186,6 +189,64 @@ describe('the global guard', () => {
         const res = await get('/api/delivery/tasks', token);
         expect(res.status).toBe(403);
         expect(res.body.message).toBe('this account is not linked to a courier');
+    });
+
+    //the roles open the routes, the courier row is the business identity: without one every courier operation is a 403
+    //with the same reason, the manager operations of the same account are untouched
+    it('every courier operation needs the courier row, the manager operations do not', async () => {
+        const f = await fixture();
+        const token = await tokenFor(app, 'solo');
+        const taskId = (await ds.getRepository(DeliveryTask).findOneByOrFail({ courier_id: f.managerCourier.id })).id;
+        const refused = [
+            get(`/api/delivery/tasks/${taskId}`, token),
+            get(`/api/delivery/lookup?number=${f.issuance.sap_number}`, token),
+            get('/api/delivery/lookup?number=0000000', token), //an unknown number: the 403 comes before the 404
+            get('/api/delivery/conflicts?operation_ids=a0d17000-0000-4000-8000-000000000001', token),
+            request(app.getHttpServer()).post(`/api/delivery/tasks/${taskId}/attempts`).set('Authorization', `Bearer ${token}`).send({}),
+            request(app.getHttpServer()).post(`/api/delivery/tasks/${taskId}/conflicts`).set('Authorization', `Bearer ${token}`).send({}),
+        ];
+        for (const res of await Promise.all(refused)) {
+            expect([res.status, res.body.message]).toEqual([403, 'this account is not linked to a courier']);
+        }
+        expect((await get(`/api/issuances/${f.issuance.id}`, token)).status).toBe(200);
+        expect((await get('/api/conflicts', token)).status).toBe(200);
+    });
+
+    it('the courier identity is the row of the moment, not a claim: a row linked after the login counts at once, an unlinked one stops', async () => {
+        const f = await fixture();
+        const token = await tokenFor(app, 'solo'); //signed with courier_id null
+        expect((await get('/api/delivery/tasks', token)).status).toBe(403);
+
+        const row = await ds.getRepository(Courier).save({ name: 'solo row', user_id: f.solo.id });
+        const issuance = await ds.getRepository(Issuance).save({ sap_number: '7100002', status: IssuanceStatus.assigned, customer_name: 'x', address_street: 'y', address_city: 'z', items: [{ line_no: 1, product_name: 'p', quantity: 1 }] } as any);
+        await ds.getRepository(DeliveryTask).save({ issuance_id: issuance.id, courier_id: row.id, status: TaskStatus.pending });
+        const tasks = await get('/api/delivery/tasks', token);
+        expect(tasks.status).toBe(200);
+        expect(JSON.stringify(tasks.body)).toContain('7100002');
+        expect(JSON.stringify(tasks.body)).not.toContain(f.issuance.sap_number);
+        //the token still says null: the claim is the client's hint, the answer of /me is the login's snapshot as well
+        expect((await get('/api/auth/me', token)).body.courier_id).toBeNull();
+
+        await ds.getRepository(Courier).update(row.id, { user_id: null });
+        expect((await get('/api/delivery/tasks', token)).status).toBe(403);
+    });
+
+    it('the mock token is checked for signature, issuer, algorithm and expiry, not only for its shape', async () => {
+        const f = await fixture();
+        const jwt = app.get(JwtService);
+        const claims = { sub: f.manager.id, username: 'manager', name: 'm', email: null, roles: [UserRole.manager, UserRole.courier], courier_id: f.managerCourier.id };
+        expect((await get('/api/auth/me', jwt.sign(claims))).status).toBe(200);
+        const bad = {
+            'another secret': jwt.sign(claims, { secret: 'not-the-server-secret' }),
+            'another issuer': jwt.sign(claims, { issuer: 'somebody-else' }),
+            'no issuer': new JwtService({ secret: jwtSecret() }).sign(claims),
+            expired: jwt.sign(claims, { expiresIn: '-1s' }),
+            'another algorithm': jwt.sign(claims, { algorithm: 'HS512' }),
+        };
+        for (const [why, token] of Object.entries(bad)) {
+            const res = await get('/api/auth/me', token);
+            expect([why, res.status, res.body.message]).toEqual([why, 401, 'token expired or invalid']);
+        }
     });
 
     //a second application booted with AUTH_MODE=cognito: the guard talks to the cognito provider, a token the mock

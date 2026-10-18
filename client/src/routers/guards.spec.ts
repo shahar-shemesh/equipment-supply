@@ -83,9 +83,9 @@ describe("route guards", () => {
     expect(await open("/")).toBe("manager");
   });
 
-  it("a manager without a courier row has nothing on the courier screens: a typed /courier goes back to the board", async () => {
+  it("a manager without a courier row opens the courier screens all the same: the roles decide, not the row", async () => {
     mocks.user = { ...manager, courier_id: null };
-    expect(await open("/courier")).toBe("manager");
+    expect(await open("/courier")).toBe("courier");
     expect(await open("/manager/couriers")).toBe("manager");
   });
 });

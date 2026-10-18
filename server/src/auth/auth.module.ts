@@ -8,7 +8,7 @@ import { User, Courier } from '../entities';
 import { AuthController } from './auth.controller';
 import { AuthGuard } from './auth.guard';
 import { AUTH_PROVIDER } from './auth.provider';
-import { MockAuthProvider } from './mock/mock-auth.provider';
+import { MOCK_TOKEN_ISSUER, MockAuthProvider } from './mock/mock-auth.provider';
 import { CognitoAuthProvider } from './cognito/cognito-auth.provider';
 import { authMode, jwtSecret } from '../env';
 
@@ -20,7 +20,10 @@ import { authMode, jwtSecret } from '../env';
     JwtModule.registerAsync({
       useFactory: () => ({
         secret: jwtSecret(),
-        signOptions: { expiresIn: '12h' }, //a courier shift, roughly
+        //a courier shift, roughly. the algorithm and the issuer are pinned on both sides: verify refuses a token with
+        //another alg (none included), another iss or no iss, and an expired one, before the claims are read
+        signOptions: { expiresIn: '12h', issuer: MOCK_TOKEN_ISSUER, algorithm: 'HS256' },
+        verifyOptions: { issuer: MOCK_TOKEN_ISSUER, algorithms: ['HS256'] },
       }),
     }),
   ],

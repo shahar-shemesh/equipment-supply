@@ -2,7 +2,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { AuthMode } from '../../shared/@core';
-import { assertSafeConfig, authMode, cognitoConfig, mockAuthAllowed, seedBulkCount, xmlExportConfig, xmlExportTarget } from './env';
+import { assertSafeConfig, authMode, cognitoConfig, isProduction, mockAuthAllowed, seedBulkCount, xmlExportConfig, xmlExportTarget } from './env';
 
 //the one env reader with input of its own: SEED_BULK goes through it so a typo refuses instead of seeding a smaller set
 
@@ -177,6 +177,46 @@ describe('authMode, mockAuthAllowed, cognitoConfig and assertSafeConfig', () => 
         expect(mockAuthAllowed()).toBe(false);
         process.env.ALLOW_MOCK_AUTH = 'true';
         expect(mockAuthAllowed()).toBe(true);
+    });
+
+    it('production is NODE_ENV=production or ENVIRONMENT=PRODUCTION, and ALLOW_MOCK_AUTH opens nothing there', () => {
+        expect(isProduction()).toBe(false);
+        process.env.ALLOW_MOCK_AUTH = 'true';
+        process.env.NODE_ENV = 'production';
+        expect(isProduction()).toBe(true);
+        expect(mockAuthAllowed()).toBe(false);
+        //LOCAL next to NODE_ENV=production is not local either
+        process.env.ENVIRONMENT = 'LOCAL';
+        expect(mockAuthAllowed()).toBe(false);
+        delete process.env.NODE_ENV;
+        for (const value of ['PRODUCTION', 'production', ' Production ']) {
+            process.env.ENVIRONMENT = value;
+            expect(isProduction()).toBe(true);
+            expect(mockAuthAllowed()).toBe(false);
+        }
+        //NODE_ENV spelled with a capital or padded is production too
+        process.env.ENVIRONMENT = 'LOCAL';
+        for (const value of ['Production', ' production ', 'PRODUCTION']) {
+            process.env.NODE_ENV = value;
+            expect(isProduction()).toBe(true);
+            expect(mockAuthAllowed()).toBe(false);
+        }
+    });
+
+    it('assertSafeConfig: mock on production throws even with ALLOW_MOCK_AUTH=true, in both spellings of production', () => {
+        process.env.JWT_SECRET = 'a-real-secret';
+        process.env.ALLOW_MOCK_AUTH = 'true';
+        process.env.NODE_ENV = 'production';
+        expect(() => assertSafeConfig(logger)).toThrow('production');
+        delete process.env.NODE_ENV;
+        process.env.ENVIRONMENT = 'PRODUCTION';
+        expect(() => assertSafeConfig(logger)).toThrow('production');
+        //the same box in cognito mode starts
+        process.env.AUTH_MODE = 'cognito';
+        process.env.COGNITO_REGION = 'r';
+        process.env.COGNITO_USER_POOL_ID = 'p';
+        process.env.COGNITO_CLIENT_ID = 'c';
+        expect(() => assertSafeConfig(logger)).not.toThrow();
     });
 
     it('the cognito configuration names the first missing variable and trims the values', () => {

@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { Repository } from 'typeorm';
 
-import { AuditAction, AuditEntityType, AuthMode, IAuthUser, MockIdentity } from '../../../../shared/@core';
+import { AuditAction, AuditEntityType, AuthMode, IAuthUser, MockIdentity, UserRole } from '../../../../shared/@core';
 import { rolesOf } from '../../../../shared/auth';
 import { User, Courier } from '../../entities';
 import { AuditService } from '../../audit/audit.service';
@@ -11,9 +11,15 @@ import { AuthProvider } from '../auth.provider';
 import { mockIdentity } from './mock-identities';
 import { mockAuthAllowed } from '../../env';
 
+//the iss claim of every token this provider signs; verify requires it (auth.module.ts), so a token signed elsewhere with
+//the same secret and algorithm is refused as well
+export const MOCK_TOKEN_ISSUER = 'equipment-supply-mock';
+
 //AUTH_MODE=mock: a signed jwt for one of the two predefined identities, no password. the identity key is the whole
 //credential, so this provider only runs where mockAuthAllowed() says so (env.ts, checked at startup). the token is the
-//same 12h jwt as before, signed by JwtModule with jwtSecret(); the claims are the IAuthUser with id under sub
+//same 12h jwt as before: HS256 with jwtSecret(), exp and iss set by JwtModule and checked by verify; the claims are the
+//IAuthUser with id under sub. courier_id in the claims is the client's hint for its offline scope, the server resolves
+//the courier row again on every courier operation (delivery/courier-identity.service.ts)
 @Injectable()
 export class MockAuthProvider implements AuthProvider {
   readonly mode = AuthMode.mock;
@@ -52,7 +58,8 @@ export class MockAuthProvider implements AuthProvider {
   //needs it too. the auth_login audit row is written here so a token issued either way is on record; detached, a
   //login writes nothing else
   async issueFor(user: User): Promise<{ token: string; user: IAuthUser }> {
-    const courier = await this.couriers.findOne({ where: { user_id: user.id } });
+    //the same lookup as delivery/courier-identity.service.ts, so the hint and the request's answer name the same row
+    const courier = await this.couriers.findOne({ where: { user_id: user.id }, order: { active: 'DESC', id: 'DESC' } });
     const authUser: IAuthUser = {
       id: user.id,
       username: user.username,
@@ -79,8 +86,12 @@ export class MockAuthProvider implements AuthProvider {
       throw new UnauthorizedException('token expired or invalid');
     }
     //a token signed before the roles existed (one `role` claim) is still signed with the same secret for up to 12h;
-    //without the list the guard could only deny, so it is refused as a whole and the client signs in again
-    if (claims?.sub == null || !Array.isArray(claims.roles)) throw new UnauthorizedException('token expired or invalid');
+    //without the list the guard could only deny, so it is refused as a whole and the client signs in again. the same
+    //for anything issueFor never writes: a sub that is not a users id, an empty list, a role outside the enum
+    const known = Object.values(UserRole);
+    if (!Number.isInteger(claims?.sub) || !Array.isArray(claims.roles) || !claims.roles.length || !claims.roles.every((r: any) => known.includes(r))) {
+      throw new UnauthorizedException('token expired or invalid');
+    }
     return {
       id: claims.sub,
       username: claims.username,

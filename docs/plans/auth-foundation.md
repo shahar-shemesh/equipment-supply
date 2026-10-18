@@ -181,6 +181,14 @@ Server: tsc clean, `npm run test:unit` 165 in 22 suites, `npm run test:e2e` 123 
 
 ## Plan Change Log
 
+### 2026-10-18: architectural follow up (user review before the commit)
+
+1. Authorization and business identity separated: route access by roles only (server guard and client `RequireRole`), the courier row resolved on every courier operation by `server/src/delivery/courier-identity.service.ts` from `couriers.user_id`, never from the token's `courier_id` (now the client's hint for its offline scope only). The courier shell shows `courier_no_identity` in place of the board when the account has no row; the manager link no longer depends on the row.
+2. Mock safety: `isProduction()` (`NODE_ENV=production` or `ENVIRONMENT=PRODUCTION`) closes the mock whatever `ALLOW_MOCK_AUTH` says, at startup and at request time; the mock JWT pins HS256 and the issuer `equipment-supply-mock` on sign and verify.
+3. Migrations: `server/src/e2e/migrations.e2e.spec.ts` on `<DB_NAME_TEST>_migrations`: the previous `users` shape with a row, `up`, parity with the entities (against synchronize's own baseline: TypeORM re-issues the `xml_outbox.id` default pair on every run), a no-op second run, `down`, `up` again.
+4. Cognito boundary unchanged and confirmed: the guard calls `provider.verify(token)` and reads an `IAuthUser`; a real verifier replaces `CognitoAuthProvider.verify` only.
+5. Tests: unit 169 in 22 suites, e2e 127 in 12 suites (the harness is one case), client 142 in 18 files; server and client builds clean; browser check of a manager without a courier row on the courier screens.
+
 ## Review Triage Log
 
 ### Pass 1 (2026-10-14): edge case hunter + verification gap, on the combined diff of parts A and B
@@ -204,3 +212,12 @@ Edge case hunter:
 7. `@Roles()` with an empty list would open a route. **Fixed**: the decorator throws on an empty list.
 8. README test counts stale. **Fixed** with the final counts after the full runs.
 Added by the author during the review: the request time lock in `MockAuthProvider.login` (`mockAuthAllowed()`, 404 like the old dev login's second lock) with `mock-auth.provider.spec.ts`.
+
+### Pass 2 (2026-10-18): edge case hunter + verification gap, on the follow up diff
+
+Verification gap: no gaps. Side notes: README counts (updated after the full runs), the migration list order in docs/domain.md (**fixed**), the login's courier lookup differing from the request's (**fixed**, same order in both), the sync strip with no scope (**fixed**, hidden).
+
+Edge case hunter, 22 items:
+- **Fixed**: NODE_ENV read trimmed and case blind, and `isLocal` reads production through `isProduction`; `verify` refuses a sub that is not an integer, an empty role list and a role outside the enum; `issueFor` uses the identity service's row order; `lookup` resolves the row before the number (no 404 probe for an unlinked account, e2e asserts it); the dead `ForbiddenException` import in `conflicts.service.ts`; the harness: `try/finally` around the fresh connection, `transaction: 'all'` like the CLI, one case instead of two dependent ones, the count from `ds.migrations`, the last migration found by timestamp, `table_schema = current_schema()`; the notice for an account with no row says "contact the manager" to a plain courier and "use the manager screen" to a manager; the docs no longer claim a row linked after the login counts on the client at once (the offline scope is the login's snapshot).
+- **Deferred**: a unique constraint on `couriers.user_id` (schema change; today only the seed writes it); a re-check of the row inside the report transaction (the window between `resolve` and the task lock exists only if a row is unlinked mid-request, which nothing does today); the client's handling of a 403 from `refresh` after a row is unlinked (the worker keeps the stale snapshot and the reports park as forbidden; a separate change in `store.ts` / `sync.ts`); migrations one to seven are exercised as no-ops only (the base schema has no migration, docs/domain.md).
+- **Refuted**: `mine()` filtering by `user_id` only is the design (evidence belongs to the account, `delivery_conflicts` is unique on `user_id, operation_id`), the resolved row is the gate; an existing `users.email` of another type does not exist in any environment, and the parity check would show it on a database that mirrors one; "no business behaviour changed" holds for every state that exists today (one row per account), the stored `courier_id` of a receipt or an evidence row now comes from the resolved row instead of the token, the same value, at the cost of one indexed lookup per courier call.

@@ -33,6 +33,9 @@ export const he = {
     nav_reports: "דוחות",
     nav_courier_view: "מסך המשנע",
     nav_manager_view: "מסך הניהול",
+    courier_no_identity: "החשבון הזה אינו מקושר לרשומת משנע, לכן אין משלוחים להצגה כאן.",
+    courier_no_identity_manager: "ניהול המשלוחים נעשה ממסך הניהול.",
+    courier_no_identity_courier: "יש לפנות למנהל המחסן.",
 
     // issuances board
     board_title: "לוח ניהול הנפקות",

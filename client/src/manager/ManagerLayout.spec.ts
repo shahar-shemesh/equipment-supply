@@ -107,11 +107,11 @@ describe("manager shell", () => {
     expect((await readBoard(SCOPE)).rows).toEqual([]);
   });
 
-  it("without a courier row there is no scope: sign out touches nothing in the database", async () => {
+  it("without a courier row the link stays (the role opens the screens) and there is no scope: sign out touches nothing in the database", async () => {
     await seed();
     mocks.user = { ...mocks.user, courier_id: null };
     await render();
-    expect(courierLink()).toBeNull();
+    expect(courierLink()).not.toBeNull();
 
     await act(async () => logoutButton()?.click());
     await vi.waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith("/login"));

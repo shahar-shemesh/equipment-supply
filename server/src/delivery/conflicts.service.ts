@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 
@@ -8,6 +8,7 @@ import { AuditService } from '../audit/audit.service';
 import { lockIssuance } from '../issuances/issuances.service';
 import { handedOver, validateRecipient, validateSignature } from './attempt.validation';
 import { isConflictUniqueViolation, parseClientTime, payloadHash, validateEvidenceItems, validateIssuanceRevision, validateOperationId } from './operation';
+import { CourierIdentityService } from './courier-identity.service';
 
 //rejected delivery reports kept as evidence. the courier side hands a report the attempts route refused over as it was
 //signed; the manager side reads it next to the authoritative state and marks it reviewed. nothing in here changes a
@@ -52,6 +53,7 @@ export class ConflictsService {
     @InjectRepository(DeliveryOperation) private operations: Repository<DeliveryOperation>,
     @InjectRepository(User) private users: Repository<User>,
     private audit: AuditService,
+    private identity: CourierIdentityService,
   ) {}
 
   // POST /api/delivery/tasks/:id/conflicts  (IAttemptPayload with operation_id)
@@ -62,7 +64,7 @@ export class ConflictsService {
   //recorded with the authoritative state of that moment. the receipt says kind: "conflict_recorded" so the tablet never
   //mistakes it for a delivery result
   async record(user: IAuthUser, taskId: number, body: any): Promise<IConflictReceipt | (IAttemptResult & { kind: 'delivered' })> {
-    const courierId = this.courierIdOf(user);
+    const courierId = await this.identity.resolve(user);
     const task = await this.tasks.findOne({ where: { id: taskId, courier_id: courierId }, relations: { issuance: true } });
     if (!task) throw new NotFoundException(`task ${taskId} not found for this courier`);
 
@@ -172,7 +174,7 @@ export class ConflictsService {
 
   // GET /api/delivery/conflicts?operation_ids=a,b  -  the courier's own evidence, review status only
   async mine(user: IAuthUser, raw: string): Promise<IConflictStatus[]> {
-    this.courierIdOf(user);
+    await this.identity.resolve(user);
     const ids = String(raw || '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 200);
     if (!ids.length) return [];
     const rows = await this.conflicts.find({ where: { user_id: user.id, operation_id: In(ids) }, select: { id: true, operation_id: true, received_at: true, review_status: true, reviewed_at: true } });
@@ -296,12 +298,5 @@ export class ConflictsService {
       courier: task?.courier ? { id: task.courier.id, name: task.courier.name } : undefined,
       issuance: task?.issuance || undefined,
     } as IDeliveryConflict;
-  }
-
-  /*──────────────────────────────────────────────────────────────────────────*/
-
-  private courierIdOf(user: IAuthUser) {
-    if (!user?.courier_id) throw new ForbiddenException('this account is not linked to a courier');
-    return +user.courier_id;
   }
 }

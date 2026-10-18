@@ -10,6 +10,7 @@ import { XmlOutboxService } from '../xml-export/xml-outbox.service';
 import { lockIssuance } from '../issuances/issuances.service';
 import { handedOver, outcomeOf, validateItemAnswers, validateRecipient, validateSignature } from './attempt.validation';
 import { isOperationUniqueViolation, parseClientTime, payloadHash, validateIssuanceRevision, validateOperationId } from './operation';
+import { CourierIdentityService } from './courier-identity.service';
 
 //every 409 of the report route carries a code from ReportConflictCode, the tablet shows a hebrew line per code.
 //nest sends the object as the body as it is, so statusCode stays for readers of the default nest shape. the default
@@ -32,11 +33,12 @@ export class DeliveryService {
     @InjectRepository(DeliveryOperation) private operations: Repository<DeliveryOperation>,
     private audit: AuditService,
     private outbox: XmlOutboxService,
+    private identity: CourierIdentityService,
   ) {}
 
   // /api/delivery/tasks?tab=all|pending|done&search=
   async myTasks(user: IAuthUser, tab = 'all', search = '') {
-    const courierId = this.courierIdOf(user);
+    const courierId = await this.identity.resolve(user);
 
     const qb = this.tasks
       .createQueryBuilder('t')
@@ -80,7 +82,7 @@ export class DeliveryService {
   // /api/delivery/tasks/:id
   async myTask(user: IAuthUser, id: number) {
     const task = await this.tasks.findOne({
-      where: { id, courier_id: this.courierIdOf(user) },
+      where: { id, courier_id: await this.identity.resolve(user) },
       relations: { issuance: { items: true }, attempts: { items: true } },
       order: { issuance: { items: { line_no: 'ASC' } }, attempts: { id: 'ASC' } },
     });
@@ -203,9 +205,9 @@ export class DeliveryService {
     }
 
     if (result.replayed) {
-      this.logger.log(`task ${task.id} (${task.issuance.sap_number}) operation ${operationId} replayed for courier ${user.courier_id}`);
+      this.logger.log(`task ${task.id} (${task.issuance.sap_number}) operation ${operationId} replayed for courier ${task.courier_id}`);
     } else {
-      this.logger.log(`task ${task.id} (${task.issuance.sap_number}) reported ${outcome} by courier ${user.courier_id}${operationId ? `, operation ${operationId}` : ''}`);
+      this.logger.log(`task ${task.id} (${task.issuance.sap_number}) reported ${outcome} by courier ${task.courier_id}${operationId ? `, operation ${operationId}` : ''}`);
     }
     return result;
   }
@@ -227,10 +229,12 @@ export class DeliveryService {
     const number = normalizeSapNumber(rawNumber);
     if (!number) throw new BadRequestException('number is required');
 
+    //the row first: an account with none is refused before it learns which numbers exist
+    const courierId = await this.identity.resolve(user);
     const issuance = await this.issuances.findOne({ where: { sap_number: number } });
     if (!issuance) throw new NotFoundException('issuance not found');
 
-    const task = await this.tasks.findOne({ where: { issuance_id: issuance.id, courier_id: this.courierIdOf(user) }, order: { id: 'DESC' } });
+    const task = await this.tasks.findOne({ where: { issuance_id: issuance.id, courier_id: courierId }, order: { id: 'DESC' } });
     if (!task || task.status === TaskStatus.cancelled) throw new ForbiddenException('issuance is not assigned to you');
     return { task_id: task.id };
   }
@@ -247,12 +251,5 @@ export class DeliveryService {
     const named = new Set(Array.isArray(raw) ? raw.map((a: any) => Number(a?.item_id)) : []);
     const removed = await this.tasks.manager.find(IssuanceItem, { where: { issuance_id: task.issuance_id, removed_at: Not(IsNull()) }, withDeleted: true });
     return [...task.issuance.items, ...removed.filter((line) => named.has(line.id))];
-  }
-
-  /*──────────────────────────────────────────────────────────────────────────*/
-
-  private courierIdOf(user: IAuthUser) {
-    if (!user?.courier_id) throw new ForbiddenException('this account is not linked to a courier');
-    return +user.courier_id;
   }
 }

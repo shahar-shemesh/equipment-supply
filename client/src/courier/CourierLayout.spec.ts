@@ -209,8 +209,26 @@ describe("a manager on the courier screens", () => {
       await render();
       expect(managerLink()?.getAttribute("href")).toBe("/manager/issuances");
       expect(managerLink()?.textContent).toBe("nav_manager_view");
+      expect(host.querySelector(".courier-no-identity")).toBeNull();
     } finally {
       mocks.user = { ...mocks.user, roles: ["courier"] } as any;
+    }
+  });
+
+  it("without a courier row the screens open with the notice in place of the board, and no worker starts", async () => {
+    const before = mocks.user;
+    mocks.user = { ...mocks.user, roles: ["manager", "courier"], courier_id: null } as any;
+    try {
+      await render();
+      expect(host.querySelector(".courier-no-identity")?.textContent).toBe("courier_no_identity courier_no_identity_manager");
+      expect(managerLink()).not.toBeNull();
+      expect(mocks.startSync).not.toHaveBeenCalled();
+      //sign out with no scope leaves at once, nothing to flush or sweep
+      await click(headerLogout());
+      await vi.waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith("/login"));
+      expect(mocks.logout).toHaveBeenCalledWith({ reason: "logout", sent: 0 });
+    } finally {
+      mocks.user = before;
     }
   });
 });

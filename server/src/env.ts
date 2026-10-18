@@ -9,7 +9,16 @@ import { AuthMode } from '../../shared/@core';
 export const DEV_JWT_SECRET = 'dev-only-secret-change-me';
 
 export function isLocal() {
-  return process.env.ENVIRONMENT === 'LOCAL' && process.env.NODE_ENV !== 'production';
+  return process.env.ENVIRONMENT === 'LOCAL' && !isProduction();
+}
+
+//NODE_ENV=production, or ENVIRONMENT=PRODUCTION, is production whatever else the env says: no developer switch opens
+//there, not even the explicit ones. both values are read trimmed and case blind, a deploy that spells it differently
+//lands on the safe side
+export function isProduction() {
+  const nodeEnv = (process.env.NODE_ENV ?? '').trim().toLowerCase();
+  const environment = (process.env.ENVIRONMENT ?? '').trim().toUpperCase();
+  return nodeEnv === 'production' || environment === 'PRODUCTION';
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/
@@ -26,9 +35,10 @@ export function authMode(): AuthMode {
 
 /*──────────────────────────────────────────────────────────────────────────*/
 
-//ALLOW_MOCK_AUTH=true is for a shared test box that has no real identity provider yet. logged loudly at startup
+//ALLOW_MOCK_AUTH=true is for a shared test box that has no real identity provider yet. logged loudly at startup, and
+//ignored on production: a copied env file must not turn the two button login on there
 export function mockAuthAllowed() {
-  return isLocal() || process.env.ALLOW_MOCK_AUTH === 'true';
+  return isLocal() || (process.env.ALLOW_MOCK_AUTH === 'true' && !isProduction());
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/
@@ -164,6 +174,9 @@ export function assertSafeConfig(logger: { log: (m: string) => void; warn: (m: s
   jwtSecret();
   const xml = xmlExportConfig(); //throws with the variable's name when the worker is on without a bucket or a region
 
+  if (mode === AuthMode.mock && isProduction()) {
+    throw new Error('AUTH_MODE=mock on production (NODE_ENV=production or ENVIRONMENT=PRODUCTION). ALLOW_MOCK_AUTH does not open it there; set AUTH_MODE=cognito');
+  }
   if (mode === AuthMode.mock && !mockAuthAllowed()) {
     throw new Error('AUTH_MODE=mock outside ENVIRONMENT=LOCAL. set ALLOW_MOCK_AUTH=true only for a test box with no real identity provider yet');
   }

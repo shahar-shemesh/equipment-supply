@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, Outlet, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Button, CircularProgress, Dialog, DialogContent } from "@mui/material";
+import { Alert, Button, CircularProgress, Dialog, DialogContent } from "@mui/material";
 import LogoutIcon from "@mui/icons-material/Logout";
 
 import { UserRole } from "../../../shared/@core";
@@ -110,10 +110,19 @@ export default function CourierLayout() {
         </div>
       </header>
 
-      <SyncStatusBar />
+      {/* the strip reads and refreshes by the scope: nothing to say without one */}
+      {scope && <SyncStatusBar />}
 
       <main className="courier-content">
-        <Outlet />
+        {/* the role opened the screens, the courier row is what they work by: without one (a manager whose account has
+            no courier row) there is nothing to fetch or store, so the notice stands where the board would */}
+        {scope ? (
+          <Outlet />
+        ) : (
+          <Alert severity="info" className="courier-no-identity">
+            {t("courier_no_identity")} {hasRole(user, UserRole.manager) ? t("courier_no_identity_manager") : t("courier_no_identity_courier")}
+          </Alert>
+        )}
       </main>
 
       <footer className="courier-footer">

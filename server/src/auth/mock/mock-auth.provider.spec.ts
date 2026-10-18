@@ -1,7 +1,9 @@
 import { ForbiddenException, NotFoundException, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 
+import { JwtService } from '@nestjs/jwt';
+
 import { MockIdentity, UserRole } from '../../../../shared/@core';
-import { MockAuthProvider } from './mock-auth.provider';
+import { MOCK_TOKEN_ISSUER, MockAuthProvider } from './mock-auth.provider';
 
 //the provider against stubs: the request time lock on the environment, the users row behind an identity, the claims
 //of the token it signs and what verify makes of them. the real route is covered by e2e/auth.e2e.spec.ts
@@ -11,10 +13,10 @@ const saved = Object.fromEntries(NAMES.map((k) => [k, process.env[k]]));
 
 const managerRow = { id: 1, username: 'manager', display_name: 'דנה לוי', email: 'manager@equipment.local', role: UserRole.manager };
 
-function build(opts: { user?: any; courier?: any } = {}) {
+function build(opts: { user?: any; courier?: any; jwt?: any } = {}) {
     const users = { findOne: jest.fn(async () => opts.user ?? null) };
     const couriers = { findOne: jest.fn(async () => opts.courier ?? null) };
-    const jwt = { sign: jest.fn((claims: any) => `signed:${JSON.stringify(claims)}`), verify: jest.fn() };
+    const jwt = opts.jwt ?? { sign: jest.fn((claims: any) => `signed:${JSON.stringify(claims)}`), verify: jest.fn() };
     const audit = { recordDetached: jest.fn(async () => undefined) };
     const provider = new MockAuthProvider(users as any, couriers as any, jwt as any, audit as any);
     return { provider, users, couriers, jwt, audit };
@@ -68,6 +70,38 @@ describe('MockAuthProvider.login', () => {
     });
 });
 
+//the real signer with the options of auth.module.ts: what issueFor signs comes back as the same user, and a token with
+//another secret, another issuer, no issuer or a past exp is refused before any claim is read
+describe('MockAuthProvider with a real JwtService', () => {
+    const SECRET = 'unit-test-secret';
+    const real = () => new JwtService({ secret: SECRET, signOptions: { expiresIn: '12h', issuer: MOCK_TOKEN_ISSUER, algorithm: 'HS256' }, verifyOptions: { issuer: MOCK_TOKEN_ISSUER, algorithms: ['HS256'] } });
+
+    it('a token from issueFor verifies back to the same IAuthUser, with exp and iss set', async () => {
+        const jwt = real();
+        const { provider } = build({ user: managerRow, courier: { id: 6 }, jwt });
+        const { token, user } = await provider.issueFor(managerRow as any);
+        await expect(provider.verify(token)).resolves.toEqual(user);
+        const claims: any = jwt.decode(token);
+        expect(claims.iss).toBe(MOCK_TOKEN_ISSUER);
+        expect(claims.exp - claims.iat).toBe(12 * 3600);
+    });
+
+    it('another secret, another issuer, no issuer, a past exp: each is a 401', async () => {
+        const jwt = real();
+        const { provider } = build({ jwt });
+        const claims = { sub: 1, username: 'manager', name: 'm', email: null, roles: [UserRole.manager, UserRole.courier], courier_id: 6 };
+        const bad = [
+            jwt.sign(claims, { secret: 'another-secret' }),
+            jwt.sign(claims, { issuer: 'somebody-else' }),
+            new JwtService({ secret: SECRET }).sign(claims), //same secret, no iss at all
+            jwt.sign(claims, { expiresIn: '-1s' }),
+            jwt.sign(claims, { algorithm: 'HS512' }),
+        ];
+        for (const token of bad) await expect(provider.verify(token)).rejects.toBeInstanceOf(UnauthorizedException);
+        await expect(provider.verify(jwt.sign(claims))).resolves.toMatchObject({ id: 1, roles: claims.roles });
+    });
+});
+
 describe('MockAuthProvider.verify', () => {
     it('maps the claims back to an IAuthUser, roles only from the signed token', async () => {
         const { provider, jwt } = build();
@@ -75,10 +109,20 @@ describe('MockAuthProvider.verify', () => {
         await expect(provider.verify('t')).resolves.toEqual({ id: 3, username: 'courier1', name: 'יוסי', email: null, roles: [UserRole.courier], courier_id: 1 });
     });
 
-    it('a token signed before the roles existed (one role claim) is a 401 as a whole', async () => {
+    it('a token signed before the roles existed (one role claim) is a 401 as a whole, like any claims issueFor never writes', async () => {
         const { provider, jwt } = build();
-        jwt.verify.mockReturnValue({ sub: 3, username: 'courier1', display_name: 'יוסי', role: UserRole.courier, courier_id: 1, exp: 1 });
-        await expect(provider.verify('t')).rejects.toBeInstanceOf(UnauthorizedException);
+        const odd = [
+            { sub: 3, username: 'courier1', display_name: 'יוסי', role: UserRole.courier, courier_id: 1, exp: 1 },
+            { sub: 'abc', username: 'courier1', roles: [UserRole.courier] },
+            { sub: 3.5, username: 'courier1', roles: [UserRole.courier] },
+            { sub: 3, username: 'courier1', roles: [] },
+            { sub: 3, username: 'courier1', roles: ['admin'] },
+            { sub: 3, username: 'courier1', roles: [UserRole.courier, 'root'] },
+        ];
+        for (const claims of odd) {
+            jwt.verify.mockReturnValue(claims);
+            await expect(provider.verify('t')).rejects.toBeInstanceOf(UnauthorizedException);
+        }
     });
 
     it('a token the secret does not match is a 401', async () => {

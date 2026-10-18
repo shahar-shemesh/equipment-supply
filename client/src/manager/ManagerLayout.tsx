@@ -22,10 +22,10 @@ export default function ManagerLayout() {
   const navigate = useNavigate();
   const { desktop } = useBreakpoint();
   const [menuOpen, setMenuOpen] = useState(false);
-  //a manager holds the courier role too: the link to the courier screens, and the scope those screens stored under.
-  //both need the courier row (the screens work by it), an account without one gets no link
+  //a manager holds the courier role too: the link to the courier screens (by the role alone), and the scope those
+  //screens stored under (by the courier row, null without one)
   const scope = scopeOf(user);
-  const courierView = hasRole(user, UserRole.courier) && !!scope;
+  const courierView = hasRole(user, UserRole.courier);
 
   //growing past 1200 hides the drawer, this clears the state too so shrinking back does not reopen it by itself
   useEffect(() => {
