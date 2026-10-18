@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable, Logger, NotFoundExc
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 
-import { AuditAction, AuditEntityType, TaskStatus } from '../../../shared/@core';
+import { AuditAction, AuditEntityType, IAuthUser, TaskStatus } from '../../../shared/@core';
 import { Courier, DeliveryTask } from '../entities';
 import { AuditService } from '../audit/audit.service';
 import { changesBetween, snapshot } from '../audit/audit.diff';
@@ -48,7 +48,7 @@ export class CouriersService {
   // POST /api/couriers
   //a deleted courier (active=false) with the same תעודת זהות comes back with the new details instead of a second row:
   //the old delivery tasks point at that row, so the history of the person stays in one place
-  async create(body: any, user: any) {
+  async create(body: any, user: IAuthUser) {
     const data = validateCourierPayload(body);
 
     //one transaction so the row and its audit line commit together. the steps are the ones the plain repository ran
@@ -70,14 +70,14 @@ export class CouriersService {
       if (isUniqueViolation(e)) throw new ConflictException(`a courier with id number ${data.id_number} already exists`);
       throw e;
     }
-    this.logger.log(`courier ${courier.id} (${courier.name}) ${existing ? 'brought back' : 'created'} by user ${user?.sub}`);
+    this.logger.log(`courier ${courier.id} (${courier.name}) ${existing ? 'brought back' : 'created'} by user ${user?.id}`);
     return courier;
   }
 
   /*──────────────────────────────────────────────────────────────────────────*/
 
   // PATCH /api/couriers/:id - the whole form again, not a partial patch. employee_id / zones / email are not on the screen and stay as they are
-  async update(id: number, body: any, user: any) {
+  async update(id: number, body: any, user: IAuthUser) {
     const data = validateCourierPayload(body);
 
     let courier: Courier;
@@ -103,7 +103,7 @@ export class CouriersService {
       if (isUniqueViolation(e)) throw new ConflictException(`a courier with id number ${data.id_number} already exists`);
       throw e;
     }
-    this.logger.log(`courier ${id} (${courier.name}) updated by user ${user?.sub}`);
+    this.logger.log(`courier ${id} (${courier.name}) updated by user ${user?.id}`);
     return courier;
   }
 
@@ -114,7 +114,7 @@ export class CouriersService {
   //refused with a 409 that names them: the manager moves those issuances to someone else first (the assign dialog),
   //nothing here guesses where they should go. several at once is all or nothing.
   //the rows are locked so an assign that races this waits (issuances.service takes the same lock on the courier)
-  async remove(ids: number[], user: any) {
+  async remove(ids: number[], user: IAuthUser) {
     if (!ids.length) throw new BadRequestException('no couriers selected');
 
     await this.couriers.manager.transaction(async (em) => {
@@ -142,7 +142,7 @@ export class CouriersService {
       await em.update(Courier, { id: In(ids) }, { active: false });
       const batchId = AuditService.batchId();
       for (const r of rows) await this.audit.record(em, { actor: user, action: AuditAction.courier_remove, entity_type: AuditEntityType.courier, entity_id: r.id, batch_id: batchId, details: { name: r.name } });
-      this.logger.warn(`couriers ${rows.map((r) => `${r.id} ${r.name}`).join(', ')} deleted by user ${user?.sub}`);
+      this.logger.warn(`couriers ${rows.map((r) => `${r.id} ${r.name}`).join(', ')} deleted by user ${user?.id}`);
     });
 
     return { deleted: ids };

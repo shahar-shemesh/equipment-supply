@@ -2,11 +2,13 @@
 
 # API
 
-All routes are under `/api` and need `Authorization: Bearer <token>` except login.
+All routes are under `/api` and need `Authorization: Bearer <token>` except `GET /auth/mode` and `POST /auth/mock/login`: the guard is global and a route opens only with `@Public()`. The Role column is any-of: a manager holds the courier role too, so the courier routes accept a manager whose account is linked to a courier row (403 otherwise). See [Authentication](auth.md).
 
 | Route | Role | What |
 | --- | --- | --- |
-| `POST /auth/login`, `GET /auth/me`, `GET /auth/dev-accounts` | | development login; the user object carries `id` next to the JWT's `sub` |
+| `GET /auth/mode` | public | which login the server runs: `{ mode: "mock" \| "cognito" }` |
+| `POST /auth/mock/login` | public | `{ identity: "manager" \| "courier" }`, mock mode only: `{ token, user: IAuthUser }` (`id, username, name, email, roles, courier_id`), 201; 400 for another identity, 503 when the seeded row is missing, 404 outside mock mode |
+| `GET /auth/me` | any | the `IAuthUser` the provider verified from the token |
 | `GET /issuances`, `GET /issuances/:id`, `GET /issuances/summary` | manager | board (`?sort=number|customer|destination|city|courier|priority|status&order=asc|desc`, filters, paging; `status`, `priority` and `city` also take a comma list, `status=assigned,delivered` is an `IN`), detail, the cities widget (`by_city` counts the `unassigned` rows of every city, all dates, a city with none is not listed; `cities` is every live city for the filter) |
 | `PATCH /issuances/:id` | manager | priority, delivery date, notes, self pickup |
 | `POST /issuances/assign`, `POST /issuances/mark-urgent` | manager | bulk actions. `assign` is all or nothing: one row the transition table refuses answers 409 `status_not_allowed` (`sap_number`, `status`, `action` in the body, see [Status transitions](domain.md#rules-enforced-on-the-server)) and nothing is written; `mark-urgent` skips the rows it may not touch and answers the count |
@@ -35,7 +37,7 @@ Made for the offline work, in `shared/@core.ts`:
 - `POST /delivery/tasks/:id/conflicts`, `GET /delivery/conflicts`, `GET /conflicts`, `GET /conflicts/:id` and `POST /conflicts/:id/review` are new, see [Unresolved reports](offline-sync.md#unresolved-reports). The shared types are `IConflictReceipt`, `IConflictStatus`, `IDeliveryConflict`, `IConflictObserved`, `ConflictReviewStatus` and, client side only, `EvidenceUploadState`. `ReportConflictCode` gained `not_a_conflict`, returned only by the conflicts route.
 - The success body is `IAttemptResult`: `{ attempt_id, outcome, task_id, reported_at, operation_id? }`, a superset of the old `{ attempt_id, outcome }`, still 201. A replay of a stored operation returns the stored body plus `replayed: true`.
 - Every 409 of that route is `{ statusCode: 409, message, code }` with `code` from `ReportConflictCode` (`task_closed`, `task_cancelled`, `issuance_not_assigned`, `revision_changed`, `operation_reused`). The default Nest `error` field is gone from these bodies; `message` and `statusCode` stay. The legacy request without an operation id still answers 409 with the message `task already closed`, now with `code: task_closed`.
-- `POST /auth/login` returns `user: { id, sub, username, display_name, role, courier_id }` and `GET /auth/me` returns `{ id, ...jwt payload }`: `id` is `users.id`, the same value as `sub`, so the client never keys its local storage on an undefined id. The client also fills `id` from `sub` for a session stored before this change.
+- The login answer and `GET /auth/me` carry `id` (`users.id`, the same value as the JWT `sub`), so the client never keys its local storage on an undefined id. Since the mock login (2026-10-14) the user object is the `IAuthUser` of `shared/@core.ts` with `roles` and `name`; a session stored with the earlier shape (`role`, `display_name`) reads as no session and the person signs in again.
 - `IIssuance.revision`, `IDeliveryAttempt.client_reported_at` and the client only `IDeliveryTask.local_report` were added to the shared types.
 
 Made for the audit log, in `shared/@core.ts`:

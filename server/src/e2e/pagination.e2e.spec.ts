@@ -7,11 +7,11 @@ import { Client } from 'pg';
 import request from 'supertest';
 
 import { AppModule } from '../app.module';
+import { tokenFor } from './auth-helper';
 import { AttemptOutcome, AuditAction, IssuanceStatus, NonDeliveryReason, Priority, TaskStatus, UserRole } from '../../../shared/@core';
 import { AuditLog } from '../entities';
 import { buildBulkIssuances, buildIssuances, users as seedUsers } from '../seed/seed.data';
 import { SeedService } from '../seed/seed.service';
-import { DEV_PASSWORD } from '../auth/auth.constants';
 
 //the manager board's offset paging on a seeded set with twenty pages: GET /api/issuances walked page by page and
 //compared with sql on the same rows. the seed runs once with the 2000 generated rows, nothing here writes after it
@@ -55,7 +55,7 @@ beforeAll(async () => {
     }
 
     const manager = seedUsers.find((u) => u.role === UserRole.manager);
-    token = (await request(app.getHttpServer()).post('/api/auth/login').send({ username: manager.username, password: DEV_PASSWORD })).body.token;
+    token = await tokenFor(app, manager.username);
     expect(token).toBeTruthy();
 }, 180000); //boot plus 2030 rows is 15 to 20 s here, the default 60 s is too close on a cold docker
 

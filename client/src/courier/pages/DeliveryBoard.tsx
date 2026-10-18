@@ -63,7 +63,7 @@ export default function DeliveryBoard() {
     <div className="delivery-board">
       <div className="delivery-board__head">
         <div>
-          <h1>{t(greetingKey())} {user?.display_name?.split(" ")[0]}</h1>
+          <h1>{t(greetingKey())} {user?.name?.split(" ")[0]}</h1>
           <div className="delivery-board__date">{todayLong()}</div>
         </div>
         <Button variant="outlined" startIcon={<QrCodeScannerIcon />} onClick={() => setFindOpen(true)}>

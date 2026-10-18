@@ -5,14 +5,13 @@ import { Test } from '@nestjs/testing';
 import { DataSource } from 'typeorm';
 import { Client } from 'pg';
 import request from 'supertest';
-import * as bcrypt from 'bcryptjs';
 
 import { AppModule } from '../app.module';
+import { tokenFor } from './auth-helper';
 import { AttemptOutcome, AuditAction, AuditActorType, AuditEntityType, IAuditEntry, IAuditPage, IssuanceStatus, Priority, RecipientType, ReportConflictCode, TaskStatus, UserRole } from '../../../shared/@core';
 import { User, Courier, Issuance, DeliveryTask, AuditLog } from '../entities';
 import { SAMPLE_SIGNATURE, couriers as seedCouriers, users as seedUsers } from '../seed/seed.data';
 import { SeedService } from '../seed/seed.service';
-import { DEV_PASSWORD } from '../auth/auth.constants';
 
 //the audit log against the same throwaway database as the other e2e specs: every action of the matrix in
 //docs/plans/audit-log.md, read back through GET /api/audit. the rows of a request are asserted next to its response, so
@@ -57,10 +56,9 @@ const OP_A = 'a0d17000-0000-4000-8000-000000000001';
 //the two logins at the end are the first two rows of every test
 async function fixture(): Promise<Fixture> {
     await ds.query('TRUNCATE TABLE xml_outbox, audit_log, delivery_conflicts, delivery_operations, delivery_attempt_items, delivery_attempts, delivery_tasks, issuance_items, issuances, couriers, users RESTART IDENTITY CASCADE');
-    const hash = await bcrypt.hash('1234', 4);
 
-    const manager = await ds.getRepository(User).save({ username: 'm', password_hash: hash, display_name: 'דנה', role: UserRole.manager });
-    const courierUser = await ds.getRepository(User).save({ username: 'c', password_hash: hash, display_name: 'courier', role: UserRole.courier });
+    const manager = await ds.getRepository(User).save({ username: 'm', display_name: 'דנה', role: UserRole.manager });
+    const courierUser = await ds.getRepository(User).save({ username: 'c', display_name: 'courier', role: UserRole.courier });
     const courier = await ds.getRepository(Courier).save({ name: 'courier one', user_id: courierUser.id });
     const otherCourier = await ds.getRepository(Courier).save({ name: 'courier two' });
 
@@ -79,7 +77,7 @@ async function fixture(): Promise<Fixture> {
     } as any);
     const task = await ds.getRepository(DeliveryTask).save({ issuance_id: issuance.id, courier_id: courier.id, status: TaskStatus.pending });
 
-    const login = async (username: string) => (await request(app.getHttpServer()).post('/api/auth/login').send({ username, password: '1234' })).body.token;
+    const login = (username: string) => tokenFor(app, username);
     const f = { issuance, task, manager, courierUser, courier, otherCourier, managerToken: await login('m'), courierToken: await login('c'), itemIds: issuance.items.map((i) => i.id) };
     expect(f.managerToken && f.courierToken).toBeTruthy();
     return f;
@@ -351,19 +349,13 @@ describe('courier rows', () => {
 /*──────────────────────────────────────────────────────────────────────────*/
 
 describe('login and reading the log', () => {
-    it('a failed login is the one rejected request that is recorded, a login writes its row, and a courier may not read', async () => {
+    it('a login writes its row with the primary role, a refused mock login writes nothing, and a courier may not read', async () => {
         const f = await fixture();
-        expect((await request(app.getHttpServer()).post('/api/auth/login').send({ username: 'm', password: 'wrong' })).status).toBe(401);
-        expect((await request(app.getHttpServer()).post('/api/auth/login').send({ username: 'x'.repeat(300), password: 'wrong' })).status).toBe(401);
-
-        //a wrong password on a real account keeps the name and points at the account; a name that matches no account is
-        //not kept (it is often a password typed into the wrong field), only the fact that someone tried
-        const failed = await rowsOf(f.managerToken, AuditAction.auth_login_failed);
-        expect(failed).toHaveLength(2);
-        expect(failed[1]).toMatchObject({ actor_type: AuditActorType.user, actor_user_id: null, actor_username: null, actor_role: null, entity_type: AuditEntityType.user, entity_id: f.manager.id, issuance_id: null });
-        expect(failed[1].details).toEqual({ username: 'm', known_user: true });
-        expect(failed[0]).toMatchObject({ actor_user_id: null, entity_id: null });
-        expect(failed[0].details).toEqual({ username: null, known_user: false });
+        //the mock login has no password to get wrong: an unknown identity is a 400 and an identity whose users row the
+        //fixture did not insert a 503 (auth.e2e.spec). neither is a credential failure, neither leaves a row
+        expect((await request(app.getHttpServer()).post('/api/auth/mock/login').send({ identity: 'admin' })).status).toBe(400);
+        expect((await request(app.getHttpServer()).post('/api/auth/mock/login').send({ identity: 'manager' })).status).toBe(503);
+        expect(await rowsOf(f.managerToken, AuditAction.auth_login_failed)).toEqual([]);
 
         const logins = await rowsOf(f.managerToken, AuditAction.auth_login);
         expect(logins.map((r) => r.actor_username).sort()).toEqual(['c', 'm']);
@@ -427,8 +419,13 @@ describe('seed', () => {
         expect(rows[0]).toMatchObject({ actor_type: AuditActorType.system, actor_user_id: null, actor_username: null, actor_role: null, action: AuditAction.system_seed, entity_type: AuditEntityType.system, entity_id: null, issuance_id: null, batch_id: null, details: { users: seedUsers.length, couriers: seedCouriers.length, issuances: 30 } });
 
         const manager = seedUsers.find((u) => u.role === UserRole.manager);
-        const token = (await request(app.getHttpServer()).post('/api/auth/login').send({ username: manager.username, password: DEV_PASSWORD })).body.token;
+        const token = await tokenFor(app, manager.username);
         expect(token).toBeTruthy();
         expect((await audit(token)).items.map((r) => r.action)).toEqual([AuditAction.auth_login, AuditAction.system_seed]);
+        //the seeded manager is the mock manager identity: linked to a courier row, so the courier screens open for them
+        const me = await get('/api/auth/me', token);
+        expect(typeof me.body.courier_id).toBe('number');
+        expect(me.body.roles).toEqual([UserRole.manager, UserRole.courier]);
+        expect((await get('/api/delivery/tasks', token)).status).toBe(200);
     });
 });

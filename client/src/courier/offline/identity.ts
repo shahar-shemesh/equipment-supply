@@ -1,4 +1,4 @@
-import { IUser } from "../../../../shared/@core";
+import { IAuthUser } from "../../../../shared/@core";
 import { TOKEN_KEY } from "../../utils/service";
 
 //who owns the local data. everything the offline layer stores is keyed by users.id + couriers.id, never by the jwt alone:
@@ -8,7 +8,7 @@ export type JwtPayload = { sub: number; courier_id: number | null; exp: number; 
 
 //returns "<user id>:<courier id>", or null when either is missing (a manager, or a session stored before user.id existed).
 //every scoped function of the data layer throws on a null scope, so nothing is ever partitioned under "undefined"
-export function scopeOf(user: Partial<IUser> | null | undefined): string | null {
+export function scopeOf(user: Partial<IAuthUser> | null | undefined): string | null {
   if (user?.id == null || user?.courier_id == null) return null;
   return `${user.id}:${user.courier_id}`;
 }

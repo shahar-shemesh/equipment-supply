@@ -3,12 +3,14 @@ import { IssuanceStatus, Priority, UserRole } from '../../../shared/@core';
 //sample data for the local foundation. names and addresses are the ones used in the figma screens where they existed.
 //nothing here comes from SAP - the SAP interface is not defined, so this file is the only "source" of issuances for now
 
+//courier = the couriers row below that carries this login. the first manager has one too: a manager holds the courier
+//role (rolesOf in shared/auth.ts) and the mock manager identity opens the courier screens with tasks of their own
 export const users = [
-  { username: 'manager', display_name: 'דנה לוי', role: UserRole.manager },
-  { username: 'manager2', display_name: 'אסף ברק', role: UserRole.manager },
-  { username: 'courier1', display_name: 'יוסי אברהם', role: UserRole.courier, courier: 'יוסי אברהם' },
-  { username: 'courier2', display_name: 'יעקב מזרחי', role: UserRole.courier, courier: 'יעקב מזרחי' },
-  { username: 'courier3', display_name: 'מירי אבני', role: UserRole.courier, courier: 'מירי אבני' },
+  { username: 'manager', display_name: 'דנה לוי', email: 'manager@equipment.local', role: UserRole.manager, courier: 'דנה לוי' },
+  { username: 'manager2', display_name: 'אסף ברק', email: 'manager2@equipment.local', role: UserRole.manager },
+  { username: 'courier1', display_name: 'יוסי אברהם', email: 'courier1@equipment.local', role: UserRole.courier, courier: 'יוסי אברהם' },
+  { username: 'courier2', display_name: 'יעקב מזרחי', email: 'courier2@equipment.local', role: UserRole.courier, courier: 'יעקב מזרחי' },
+  { username: 'courier3', display_name: 'מירי אבני', email: 'courier3@equipment.local', role: UserRole.courier, courier: 'מירי אבני' },
 ];
 
 //id numbers are the ones printed on the ניהול שליחים screen, they do not pass the check digit (see courier.validation.ts)
@@ -18,7 +20,11 @@ export const couriers = [
   { name: 'מירי אבני', employee_id: 'E-1003', id_number: '400789909', phone: '052-3333333', zones: ['חולון', 'בת ים'] },
   { name: 'אמנון שילוח בע"מ', employee_id: 'E-2001', id_number: '405980076', phone: '03-5555555', zones: ['ירושלים'] }, //external company, no login. ח.פ in the id column
   { name: 'דרום קווים', employee_id: 'E-2002', id_number: '301227367', phone: '08-6666666', zones: ['באר שבע'] }, //external company, no login
+  { name: 'דנה לוי', employee_id: 'E-1000', id_number: '200789909', phone: '052-0000000', zones: ['תל אביב'] }, //the manager's own courier row, last so the indexes above keep their rows
 ];
+
+//the couriers with a login, in the order of the users above: the handcrafted set spreads its tasks over them
+const loginCouriers = users.filter((u) => u.courier).map((u) => u.courier);
 
 const customers = [
   { name: 'עדי כהן-הלוי', id_number: '012345678', phone: '052-1234567' },
@@ -73,8 +79,8 @@ export function buildIssuances() {
 
     let status = IssuanceStatus.unassigned;
     let courier: string = null;
-    //only the three couriers with a login get tasks, spread by n/3 so the same courier does not get every row
-    const loginCourier = couriers[Math.floor(n / 3) % 3].name;
+    //only the couriers with a login get tasks, spread by n/3 so the same courier does not get every row
+    const loginCourier = loginCouriers[Math.floor(n / 3) % loginCouriers.length];
     if (n % 3 === 1) {
       status = IssuanceStatus.assigned;
       courier = loginCourier;
@@ -268,7 +274,7 @@ export function buildBulkIssuances(count: number) {
       notes: rand() < 0.1 ? pick(notePool) : null,
       source: 'sample',
       items,
-      //any of the 5 couriers, the two companies included, only where the seed loop has a task to create
+      //any of the couriers, the two companies included, only where the seed loop has a task to create
       courier: closed || status === IssuanceStatus.assigned ? pick(couriers).name : null,
     };
 

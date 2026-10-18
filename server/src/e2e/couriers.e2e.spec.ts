@@ -5,9 +5,9 @@ import { Test } from '@nestjs/testing';
 import { DataSource } from 'typeorm';
 import { Client } from 'pg';
 import request from 'supertest';
-import * as bcrypt from 'bcryptjs';
 
 import { AppModule } from '../app.module';
+import { tokenFor } from './auth-helper';
 import { IssuanceStatus, TaskStatus, UserRole } from '../../../shared/@core';
 import { User, Courier, Issuance, DeliveryTask } from '../entities';
 
@@ -49,11 +49,10 @@ afterAll(async () => {
 //a manager and a courier login, nothing else. the couriers under test come in through the routes
 async function reset() {
     await ds.query('TRUNCATE TABLE xml_outbox, audit_log, delivery_conflicts, delivery_operations, delivery_attempt_items, delivery_attempts, delivery_tasks, issuance_items, issuances, couriers, users RESTART IDENTITY CASCADE');
-    const hash = await bcrypt.hash('1234', 4);
-    await ds.getRepository(User).save({ username: 'm', password_hash: hash, display_name: 'manager', role: UserRole.manager });
-    await ds.getRepository(User).save({ username: 'c', password_hash: hash, display_name: 'courier', role: UserRole.courier });
-    managerToken = (await request(app.getHttpServer()).post('/api/auth/login').send({ username: 'm', password: '1234' })).body.token;
-    courierToken = (await request(app.getHttpServer()).post('/api/auth/login').send({ username: 'c', password: '1234' })).body.token;
+    await ds.getRepository(User).save({ username: 'm', display_name: 'manager', role: UserRole.manager });
+    await ds.getRepository(User).save({ username: 'c', display_name: 'courier', role: UserRole.courier });
+    managerToken = await tokenFor(app, 'm');
+    courierToken = await tokenFor(app, 'c');
     expect(managerToken).toBeTruthy();
     expect(courierToken).toBeTruthy();
 }

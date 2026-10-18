@@ -1,12 +1,11 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 
-import { Priority, UserRole } from '../../../shared/@core';
-import { AuthGuard, CurrentUser, Roles } from '../auth/auth.guard';
+import { IAuthUser, Priority, UserRole } from '../../../shared/@core';
+import { CurrentUser, Roles } from '../auth/auth.guard';
 import { IssuancesService } from './issuances.service';
 
 //manager side. the courier reads issuances only through /api/delivery
 @Controller('/api/issuances')
-@UseGuards(AuthGuard)
 @Roles(UserRole.manager)
 export class IssuancesController {
   constructor(private readonly svc: IssuancesService) {}
@@ -28,34 +27,34 @@ export class IssuancesController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() body: any, @CurrentUser() user: any) {
+  update(@Param('id') id: string, @Body() body: any, @CurrentUser() user: IAuthUser) {
     return this.svc.update(+id, body, user);
   }
 
   @Post('assign')
-  assign(@Body() body: any, @CurrentUser() user: any) {
+  assign(@Body() body: any, @CurrentUser() user: IAuthUser) {
     return this.svc.assign((body?.ids || []).map(Number), +body?.courier_id, body?.scheduled_date, user);
   }
 
   @Post('mark-urgent')
-  markUrgent(@Body() body: any, @CurrentUser() user: any) {
+  markUrgent(@Body() body: any, @CurrentUser() user: IAuthUser) {
     return this.svc.setPriority((body?.ids || []).map(Number), Priority.urgent, user);
   }
 
   //the warehouse manager hands a self pickup issuance over: the courier's report payload, the manager from the token
   @Post(':id/self-pickup/report')
-  reportSelfPickup(@Param('id') id: string, @Body() body: any, @CurrentUser() user: any) {
+  reportSelfPickup(@Param('id') id: string, @Body() body: any, @CurrentUser() user: IAuthUser) {
     return this.svc.reportSelfPickup(+id, body, user);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string, @Body() body: any, @CurrentUser() user: any) {
+  remove(@Param('id') id: string, @Body() body: any, @CurrentUser() user: IAuthUser) {
     return this.svc.softDelete(+id, body?.reason, user);
   }
 
   //one line off the document. "abc" becomes NaN here and the service answers 400, like a bad body field
   @Delete(':id/items/:itemId')
-  removeItem(@Param('id') id: string, @Param('itemId') itemId: string, @CurrentUser() user: any) {
+  removeItem(@Param('id') id: string, @Param('itemId') itemId: string, @CurrentUser() user: IAuthUser) {
     return this.svc.removeItem(+id, +itemId, user);
   }
 }

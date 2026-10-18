@@ -1,21 +1,21 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Alert, Button, TextField } from "@mui/material";
+import { Alert, Button } from "@mui/material";
 
+import { AuthMode, MockIdentity } from "../../../shared/@core";
 import { Logo } from "../components/Logo";
 import { homeOf, useAuth } from "../utils/auth";
-import { get, SessionEnd, takeSessionEnd } from "../utils/service";
+import { errorMessage, SessionEnd, takeSessionEnd } from "../utils/service";
 import { useOtherAccountsWork } from "../courier/offline/useCourierData";
 
+//what the page offers is the server's mode (GET /api/auth/mode through the provider): two identity buttons in mock
+//mode, the boundary message in cognito mode, nothing but a loading line until the answer is in
 export default function LoginPage() {
   const { t } = useTranslation();
-  const { user, login } = useAuth();
+  const { user, mode, modeError, signIn } = useAuth();
   const navigate = useNavigate();
 
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [accounts, setAccounts] = useState<any[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [online, setOnline] = useState(navigator.onLine);
@@ -23,11 +23,6 @@ export default function LoginPage() {
   const { data: pendingWork } = useOtherAccountsWork(null);
   //why the last session ended (clearSession wrote the note), consumed once so a reload of this page does not repeat it
   const [sessionEnd, setSessionEnd] = useState<SessionEnd | null>(null);
-
-  //the seeded accounts, only returned by the server in dev-local
-  useEffect(() => {
-    get("/auth/dev-accounts").then(setAccounts).catch(() => setAccounts([]));
-  }, []);
 
   useEffect(() => {
     const end = takeSessionEnd();
@@ -50,16 +45,14 @@ export default function LoginPage() {
     };
   }, []);
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
+  async function enter(identity: MockIdentity) {
     setBusy(true);
     setError("");
     try {
-      const u = await login(username, password);
+      const u = await signIn({ identity });
       navigate(homeOf(u), { replace: true });
     } catch (err) {
-      // console.log("login failed", err);
-      setError(t("login_failed"));
+      setError(errorMessage(err));
     } finally {
       setBusy(false);
     }
@@ -67,7 +60,7 @@ export default function LoginPage() {
 
   return (
     <div className="login-page">
-      <form className="login-card" onSubmit={submit}>
+      <div className="login-card">
         <div className="login-card__logo">
           <Logo dark />
           <span>{t("app_name_long")}</span>
@@ -85,33 +78,25 @@ export default function LoginPage() {
           <Alert key={w.scope} severity="info">{t(w.count === 1 ? "login_pending_work_one" : "login_pending_work", { count: w.count, name: w.display_name || w.username })}</Alert>
         ))}
 
-        {/* phone keyboards capitalize the first letter and autocorrect by default, the server matches the username as typed */}
-        <TextField label={t("login_username")} value={username} onChange={(e) => setUsername(e.target.value)} autoFocus fullWidth autoComplete="username" inputProps={{ autoCapitalize: "none", autoCorrect: "off", spellCheck: false }} />
-        <TextField label={t("login_password")} type="password" value={password} onChange={(e) => setPassword(e.target.value)} fullWidth autoComplete="current-password" />
+        {mode === AuthMode.mock && (
+          <>
+            <Alert severity="warning" icon={false}>{t("login_mock_banner")}</Alert>
+            <div className="login-card__identities">
+              <Button variant="contained" size="large" disabled={busy} onClick={() => enter(MockIdentity.manager)}>
+                {t("login_as_manager")}
+              </Button>
+              <Button variant="outlined" size="large" disabled={busy} onClick={() => enter(MockIdentity.courier)}>
+                {t("login_as_courier")}
+              </Button>
+            </div>
+          </>
+        )}
+        {mode === AuthMode.cognito && <Alert severity="info">{t("login_cognito_missing")}</Alert>}
+        {!mode && modeError && <Alert severity="error">{t("login_server_unreachable")}</Alert>}
+        {!mode && !modeError && <p className="login-card__loading">{t("login_mode_loading")}</p>}
 
         {error && <Alert severity="error">{error}</Alert>}
-
-        <Button type="submit" variant="contained" size="large" disabled={busy || !username || !password}>
-          {t("login_button")}
-        </Button>
-
-        {accounts.length > 0 && (
-          <div className="login-card__dev">
-            <Alert severity="warning" icon={false}>{t("login_dev_banner")}</Alert>
-            <div className="login-card__dev-title">{t("login_dev_accounts")}</div>
-            <ul>
-              {accounts.map((a) => (
-                <li key={a.username}>
-                  <button type="button" className="link-button" onClick={() => { setUsername(a.username); setPassword(a.password); }}>
-                    {a.username}
-                  </button>
-                  <span> - {a.display_name}, {t(a.role === "manager" ? "role_manager" : "role_courier")}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </form>
+      </div>
     </div>
   );
 }

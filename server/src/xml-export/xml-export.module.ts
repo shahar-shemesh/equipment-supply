@@ -2,7 +2,6 @@ import { Global, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { XmlOutbox } from '../entities';
-import { AuthModule } from '../auth/auth.module';
 import { xmlExportConfig } from '../env';
 import { XmlOutboxService } from './xml-outbox.service';
 import { XmlBuilderService } from './xml-builder.service';
@@ -18,7 +17,7 @@ import { XmlExportController } from './xml-export.controller';
 //of S3StorageService still reaches the worker through the factory
 @Global()
 @Module({
-  imports: [TypeOrmModule.forFeature([XmlOutbox]), AuthModule],
+  imports: [TypeOrmModule.forFeature([XmlOutbox])],
   controllers: [XmlExportController],
   providers: [
     XmlOutboxService,

@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next";
 import { Button, CircularProgress, Dialog, DialogContent } from "@mui/material";
 import LogoutIcon from "@mui/icons-material/Logout";
 
+import { UserRole } from "../../../shared/@core";
+import { hasRole } from "../../../shared/auth";
 import { Logo } from "../components/Logo";
 import { useAuth } from "../utils/auth";
 import { currentToken, scopeOf, tokenIsFresh } from "./offline/identity";
@@ -98,10 +100,14 @@ export default function CourierLayout() {
     <div className="courier-shell">
       <header className="app-header app-header--courier">
         <Logo />
-        <button type="button" className="app-header__logout" onClick={signOut}>
-          {t("logout")}
-          <LogoutIcon fontSize="small" />
-        </button>
+        <div className="app-header__actions">
+          {/* a manager holds the courier role too and came from the board: the way back, no second login */}
+          {hasRole(user, UserRole.manager) && <Link to="/manager/issuances" className="app-header__link">{t("nav_manager_view")}</Link>}
+          <button type="button" className="app-header__logout" onClick={signOut}>
+            {t("logout")}
+            <LogoutIcon fontSize="small" />
+          </button>
+        </div>
       </header>
 
       <SyncStatusBar />

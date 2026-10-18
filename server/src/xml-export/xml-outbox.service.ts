@@ -4,18 +4,19 @@ import { randomUUID } from 'crypto';
 import { EntityManager, Repository } from 'typeorm';
 
 import { AuditAction, AuditActorType, AuditEntityType, IXmlExportEvent, IXmlExportOverview, IssuanceStatus, UserRole, XmlOutboxStatus } from '../../../shared/@core';
+import { primaryRole } from '../../../shared/auth';
 import { AuditService } from '../audit/audit.service';
 import { Issuance, XmlOutbox } from '../entities';
 import { FORBIDDEN_DETAIL_KEYS, XmlOutboxPayload } from './xml-builder.service';
 
 //what a service hands over after it wrote a status. issuance is the row as it is after the change (the snapshot keeps
-//seven fields of it, never the customer), actor the jwt payload of the request, trigger the audit action of the same
+//seven fields of it, never the customer), actor the request's user as the audit row keeps it, trigger the audit action of the same
 //change, details ids and short scalars like the audit row's
 export type OutboxEntry = {
   issuance: Pick<Issuance, 'id' | 'sap_number' | 'number_prefix' | 'priority' | 'delivery_date' | 'self_pickup' | 'revision'>;
   from: IssuanceStatus;
   to: IssuanceStatus;
-  actor?: { sub?: number; username?: string; role?: UserRole } | null;
+  actor?: { id?: number; username?: string; roles?: UserRole[] } | null;
   trigger: AuditAction;
   details?: Record<string, any> | null;
 };
@@ -174,7 +175,7 @@ export function toPayload(entry: OutboxEntry): XmlOutboxPayload {
   }
   return {
     issuance: { id: i.id, sap_number: i.sap_number, number_prefix: i.number_prefix ?? null, priority: i.priority, delivery_date: i.delivery_date ?? null, self_pickup: !!i.self_pickup, revision: i.revision },
-    actor: { type: actor ? AuditActorType.user : AuditActorType.system, user_id: actor?.sub ?? null, username: actor?.username ?? null, role: actor?.role ?? null },
+    actor: { type: actor ? AuditActorType.user : AuditActorType.system, user_id: actor?.id ?? null, username: actor?.username ?? null, role: primaryRole(actor?.roles) },
     details,
   };
 }

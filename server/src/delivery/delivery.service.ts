@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Not, Repository } from 'typeorm';
 
-import { AuditAction, AuditEntityType, IAttemptResult, IssuanceStatus, ReportConflictCode, TaskStatus } from '../../../shared/@core';
+import { AuditAction, AuditEntityType, IAttemptResult, IAuthUser, IssuanceStatus, ReportConflictCode, TaskStatus } from '../../../shared/@core';
 import { normalizeSapNumber } from '../../../shared/@utils';
 import { DeliveryTask, DeliveryAttempt, Issuance, IssuanceItem, DeliveryOperation } from '../entities';
 import { AuditService } from '../audit/audit.service';
@@ -35,7 +35,7 @@ export class DeliveryService {
   ) {}
 
   // /api/delivery/tasks?tab=all|pending|done&search=
-  async myTasks(user: any, tab = 'all', search = '') {
+  async myTasks(user: IAuthUser, tab = 'all', search = '') {
     const courierId = this.courierIdOf(user);
 
     const qb = this.tasks
@@ -78,7 +78,7 @@ export class DeliveryService {
   /*──────────────────────────────────────────────────────────────────────────*/
 
   // /api/delivery/tasks/:id
-  async myTask(user: any, id: number) {
+  async myTask(user: IAuthUser, id: number) {
     const task = await this.tasks.findOne({
       where: { id, courier_id: this.courierIdOf(user) },
       relations: { issuance: { items: true }, attempts: { items: true } },
@@ -98,12 +98,12 @@ export class DeliveryService {
   //
   //with an operation_id (the offline queue on the tablet) the same request may arrive twice: the tablet committed the
   //report locally, sent it, and never saw the response. so under the lock the stored operation is looked up FIRST, before
-  //the "task is closed" check, and answered with the stored result. the lookup is scoped by the account (user.sub), so
+  //the "task is closed" check, and answered with the stored result. the lookup is scoped by the account (user.id), so
   //another account with the same id never gets this result or this signature back.
   //a report on a task that was cancelled meanwhile (reassigned, even to the same courier when the manager moves the date,
   //self pickup, delete) is a 409 task_cancelled and stays on the tablet for attention. no retargeting to the new task on
   //purpose: the courier signed for that task, the manager decides what the new one means
-  async report(user: any, id: number, body: any): Promise<IAttemptResult> {
+  async report(user: IAuthUser, id: number, body: any): Promise<IAttemptResult> {
     const task = await this.myTask(user, id); //also proves the task belongs to this courier
     const operationId = validateOperationId(body?.operation_id);
     const issuanceRevision = validateIssuanceRevision(body?.issuance_revision);
@@ -137,7 +137,7 @@ export class DeliveryService {
 
         if (operationId) {
           //typeorm 0.3 throws on findOne without a where, so the scope is spelled out even though it is the whole point
-          const stored = await em.findOne(DeliveryOperation, { where: { user_id: user.sub, operation_id: operationId } });
+          const stored = await em.findOne(DeliveryOperation, { where: { user_id: user.id, operation_id: operationId } });
           if (stored) return this.replay(stored, task.id, hash);
         }
 
@@ -180,7 +180,7 @@ export class DeliveryService {
         if (operationId) {
           fresh.operation_id = operationId;
           //the receipt goes in the same transaction as the attempt: either both exist or neither
-          await em.save(em.create(DeliveryOperation, { user_id: user.sub, courier_id: task.courier_id, operation_id: operationId, task_id: task.id, attempt_id: attempt.id, payload_hash: hash, client_reported_at: clientReportedAt, result: fresh }));
+          await em.save(em.create(DeliveryOperation, { user_id: user.id, courier_id: task.courier_id, operation_id: operationId, task_id: task.id, attempt_id: attempt.id, payload_hash: hash, client_reported_at: clientReportedAt, result: fresh }));
         }
         //the audit row rides on the same transaction, after the receipt. the replay paths above return before this line
         //and the unique violation catch below never reaches it, so one operation has exactly one row. ids and counts only,
@@ -197,7 +197,7 @@ export class DeliveryService {
       //already rolled back here (a pg session in error cannot run the re-read inside the callback), so the plain
       //repository on its own connection answers with the row the first request committed
       if (!operationId || !isOperationUniqueViolation(e)) throw e;
-      const stored = await this.operations.findOne({ where: { user_id: user.sub, operation_id: operationId } });
+      const stored = await this.operations.findOne({ where: { user_id: user.id, operation_id: operationId } });
       if (!stored) throw e;
       result = this.replay(stored, task.id, hash);
     }
@@ -223,7 +223,7 @@ export class DeliveryService {
   /*──────────────────────────────────────────────────────────────────────────*/
 
   // /api/delivery/lookup?number=1234567  -  the "איתור הנפקה" button, manual entry until the camera is wired
-  async lookup(user: any, rawNumber: string) {
+  async lookup(user: IAuthUser, rawNumber: string) {
     const number = normalizeSapNumber(rawNumber);
     if (!number) throw new BadRequestException('number is required');
 
@@ -251,7 +251,7 @@ export class DeliveryService {
 
   /*──────────────────────────────────────────────────────────────────────────*/
 
-  private courierIdOf(user: any) {
+  private courierIdOf(user: IAuthUser) {
     if (!user?.courier_id) throw new ForbiddenException('this account is not linked to a courier');
     return +user.courier_id;
   }

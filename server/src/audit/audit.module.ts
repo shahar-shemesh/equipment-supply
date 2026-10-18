@@ -2,7 +2,6 @@ import { Global, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AuditLog } from '../entities';
-import { AuthModule } from '../auth/auth.module';
 import { AuditService } from './audit.service';
 import { AuditController } from './audit.controller';
 
@@ -10,7 +9,7 @@ import { AuditController } from './audit.controller';
 //the row rides on the caller's transaction, a module import per feature would be ceremony
 @Global()
 @Module({
-  imports: [TypeOrmModule.forFeature([AuditLog]), AuthModule],
+  imports: [TypeOrmModule.forFeature([AuditLog])],
   controllers: [AuditController],
   providers: [AuditService],
   exports: [AuditService],

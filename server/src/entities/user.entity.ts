@@ -2,9 +2,9 @@ import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn } from 'typeor
 
 import { UserRole } from '../../../shared/@core';
 
-//login accounts. in the local foundation these are only the seeded dev accounts (seed.data.ts).
-//the production identity source is still open in the spec: email + password, or national identity (הזדהות לאומית)?
-//whatever it turns out to be, it should replace auth.service.login and leave this table as the local user record
+//the local user record behind a login. no credential lives here: in mock mode the identity key maps to a username
+//(auth/mock/mock-identities.ts), with the real identity provider the token's claims will (auth/cognito/). role is the
+//one value the roles are derived from (rolesOf in shared/auth.ts), a manager holds the courier role too
 @Entity('users')
 export class User {
   @PrimaryGeneratedColumn()
@@ -14,10 +14,10 @@ export class User {
   username: string;
 
   @Column()
-  password_hash: string; //bcrypt, dev accounts only
-
-  @Column()
   display_name: string;
+
+  @Column({ nullable: true })
+  email: string; //what the identity provider says, informative only, nothing is sent
 
   @Column({ type: 'varchar' })
   role: UserRole; //manager|courier

@@ -5,9 +5,9 @@ import { Test } from '@nestjs/testing';
 import { DataSource } from 'typeorm';
 import { Client } from 'pg';
 import request from 'supertest';
-import * as bcrypt from 'bcryptjs';
 
 import { AppModule } from '../app.module';
+import { tokenFor } from './auth-helper';
 import { ConflictReviewStatus, IssuanceStatus, NonDeliveryReason, RecipientType, ReportConflictCode, TaskStatus, UserRole } from '../../../shared/@core';
 import { User, Courier, Issuance, DeliveryTask, DeliveryAttempt, DeliveryConflict, DeliveryOperation } from '../entities';
 import { SAMPLE_SIGNATURE } from '../seed/seed.data';
@@ -54,12 +54,11 @@ const OP_B = 'c0ff11ce-0000-4000-8000-000000000002';
 //two managers, two couriers with a login, one issuance with two lines assigned to the first courier
 async function fixture(): Promise<Fixture> {
     await ds.query('TRUNCATE TABLE xml_outbox, audit_log, delivery_conflicts, delivery_operations, delivery_attempt_items, delivery_attempts, delivery_tasks, issuance_items, issuances, couriers, users RESTART IDENTITY CASCADE');
-    const hash = await bcrypt.hash('1234', 4);
 
-    await ds.getRepository(User).save({ username: 'm', password_hash: hash, display_name: 'דנה', role: UserRole.manager });
-    await ds.getRepository(User).save({ username: 'm2', password_hash: hash, display_name: 'אסף', role: UserRole.manager });
-    const courierUser = await ds.getRepository(User).save({ username: 'c', password_hash: hash, display_name: 'courier', role: UserRole.courier });
-    const otherUser = await ds.getRepository(User).save({ username: 'c2', password_hash: hash, display_name: 'courier two', role: UserRole.courier });
+    await ds.getRepository(User).save({ username: 'm', display_name: 'דנה', role: UserRole.manager });
+    await ds.getRepository(User).save({ username: 'm2', display_name: 'אסף', role: UserRole.manager });
+    const courierUser = await ds.getRepository(User).save({ username: 'c', display_name: 'courier', role: UserRole.courier });
+    const otherUser = await ds.getRepository(User).save({ username: 'c2', display_name: 'courier two', role: UserRole.courier });
     const courier = await ds.getRepository(Courier).save({ name: 'courier one', user_id: courierUser.id });
     const otherCourier = await ds.getRepository(Courier).save({ name: 'courier two', user_id: otherUser.id });
 
@@ -78,7 +77,7 @@ async function fixture(): Promise<Fixture> {
     } as any);
     const task = await ds.getRepository(DeliveryTask).save({ issuance_id: issuance.id, courier_id: courier.id, status: TaskStatus.pending });
 
-    const login = async (username: string) => (await request(app.getHttpServer()).post('/api/auth/login').send({ username, password: '1234' })).body.token;
+    const login = (username: string) => tokenFor(app, username);
     const f = { issuance, task, courier, courierUser, otherCourier, managerToken: await login('m'), manager2Token: await login('m2'), courierToken: await login('c'), otherToken: await login('c2'), itemIds: issuance.items.map((i) => i.id) };
     expect(f.managerToken && f.manager2Token && f.courierToken && f.otherToken).toBeTruthy();
     return f;

@@ -4,13 +4,14 @@ import { randomUUID } from 'crypto';
 import { EntityManager, Repository } from 'typeorm';
 
 import { AuditAction, AuditActorType, AuditEntityType, IAuditEntry, IAuditPage, UserRole } from '../../../shared/@core';
+import { primaryRole } from '../../../shared/auth';
 import { AuditLog } from '../entities';
 import { parseAuditQuery } from './audit.validation';
 
-//what a service hands over for one row. actor is the jwt payload of the request (sub, username, role); without one the
-//row is the system's (the seed). entity_id and issuance_id are the ids after the change, details are ids and short scalars
+//what a service hands over for one row. actor is the request's user (id, username, roles; the row keeps the primary
+//role, a manager's actions are a manager's); without one the row is the system's (the seed). entity_id and issuance_id are the ids after the change, details are ids and short scalars
 export type AuditEntry = {
-  actor?: { sub?: number; username?: string; role?: UserRole } | null;
+  actor?: { id?: number; username?: string; roles?: UserRole[] } | null;
   actor_type?: AuditActorType; //only when there is no actor to derive it from: a failed login is a person, not the system
   action: AuditAction;
   entity_type: AuditEntityType;
@@ -71,9 +72,9 @@ function toRow(entry: AuditEntry): Partial<AuditLog> {
   const actor = entry.actor || null;
   return {
     actor_type: entry.actor_type ?? (actor ? AuditActorType.user : AuditActorType.system),
-    actor_user_id: actor?.sub ?? null,
+    actor_user_id: actor?.id ?? null,
     actor_username: actor?.username ?? null,
-    actor_role: actor?.role ?? null,
+    actor_role: primaryRole(actor?.roles),
     action: entry.action,
     entity_type: entry.entity_type,
     entity_id: entry.entity_id ?? null,

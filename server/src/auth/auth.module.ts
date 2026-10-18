@@ -1,12 +1,16 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
+import { AuthMode } from '../../../shared/@core';
 import { User, Courier } from '../entities';
-import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { AuthGuard } from './auth.guard';
-import { jwtSecret } from '../env';
+import { AUTH_PROVIDER } from './auth.provider';
+import { MockAuthProvider } from './mock/mock-auth.provider';
+import { CognitoAuthProvider } from './cognito/cognito-auth.provider';
+import { authMode, jwtSecret } from '../env';
 
 @Module({
   imports: [
@@ -21,7 +25,16 @@ import { jwtSecret } from '../env';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, AuthGuard],
-  exports: [AuthService, AuthGuard, JwtModule],
+  providers: [
+    MockAuthProvider,
+    CognitoAuthProvider,
+    //both providers exist, the mode picks which one the guard talks to. picked once at boot like the storage backend
+    //of the xml export: a failing cognito never falls back to the mock
+    { provide: AUTH_PROVIDER, inject: [MockAuthProvider, CognitoAuthProvider], useFactory: (mock: MockAuthProvider, cognito: CognitoAuthProvider) => (authMode() === AuthMode.cognito ? cognito : mock) },
+    //global: every route of every module is guarded unless it says @Public(). the feature modules no longer carry
+    //@UseGuards, a new controller is closed the moment it exists
+    { provide: APP_GUARD, useClass: AuthGuard },
+  ],
+  exports: [MockAuthProvider, AUTH_PROVIDER, JwtModule],
 })
 export class AuthModule {}

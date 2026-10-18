@@ -4,7 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Button, CircularProgress } from "@mui/material";
 
 import { UserRole } from "../../../shared/@core";
-import { homeOf, useAuth } from "../utils/auth";
+import { HomeRedirect, RequireRole } from "./guards";
 
 import LoginPage from "../pages/LoginPage";
 import ManagerLayout from "../manager/ManagerLayout";
@@ -72,21 +72,4 @@ function LoadFailed() {
       <Button variant="outlined" onClick={() => window.location.reload()}>{t("page_reload")}</Button>
     </div>
   );
-}
-
-/*──────────────────────────────────────────────────────────────────────────*/
-
-function RequireRole({ role, children }: { role: UserRole; children: React.ReactNode }) {
-  const { user } = useAuth();
-  if (!user) return <Navigate to="/login" replace />;
-  //a courier that types /manager lands on their own board, not on a 403
-  if (user.role !== role) return <Navigate to={homeOf(user)} replace />;
-  return <>{children}</>;
-}
-
-/*──────────────────────────────────────────────────────────────────────────*/
-
-function HomeRedirect() {
-  const { user } = useAuth();
-  return <Navigate to={user ? homeOf(user) : "/login"} replace />;
 }

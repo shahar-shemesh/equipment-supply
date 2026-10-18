@@ -1,4 +1,4 @@
-import { IDeliveryTask, IUser, IssuanceStatus, NonDeliveryReason, Priority, RecipientType, TaskStatus, UserRole } from "../../../shared/@core";
+import { IAuthUser, IDeliveryTask, IssuanceStatus, NonDeliveryReason, Priority, RecipientType, TaskStatus, UserRole } from "../../../shared/@core";
 import { ReportForm } from "../courier/offline/store";
 import { TOKEN_KEY } from "../utils/service";
 
@@ -7,8 +7,8 @@ import { TOKEN_KEY } from "../utils/service";
 
 export const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
-export const courierUser: IUser = { id: 7, username: "dan", display_name: "דן משנע", role: UserRole.courier, courier_id: 3 };
-export const otherUser: IUser = { id: 8, username: "gal", display_name: "גל משנע", role: UserRole.courier, courier_id: 4 };
+export const courierUser: IAuthUser = { id: 7, username: "dan", name: "דן משנע", email: "dan@equipment.local", roles: [UserRole.courier], courier_id: 3 };
+export const otherUser: IAuthUser = { id: 8, username: "gal", name: "גל משנע", email: "gal@equipment.local", roles: [UserRole.courier], courier_id: 4 };
 export const SCOPE = "7:3";
 export const OTHER_SCOPE = "8:4";
 

@@ -22,7 +22,7 @@ const issuance: any = {
     revision: 3,
 };
 
-const actor = { sub: 4, username: 'c', role: UserRole.courier };
+const actor = { id: 4, username: 'c', roles: [UserRole.courier] };
 
 //the query builder of the MAX(sequence) read, answering max as pg does for an aggregate: a string
 function em(max = 0) {

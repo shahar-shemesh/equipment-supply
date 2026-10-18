@@ -18,12 +18,12 @@ export const he = {
 
     // login
     login_title: "כניסה למערכת",
-    login_username: "שם משתמש",
-    login_password: "סיסמה",
-    login_button: "כניסה",
-    login_failed: "שם משתמש או סיסמה שגויים",
-    login_dev_banner: "סביבת פיתוח: הכניסה היא עם חשבונות מקומיים בלבד. שיטת ההזדהות בייצור (אימייל וסיסמה או הזדהות לאומית) עדיין לא נקבעה.",
-    login_dev_accounts: "חשבונות פיתוח (לחיצה ממלאת את הטופס)",
+    login_mode_loading: "בודק את שיטת הכניסה...",
+    login_server_unreachable: "השרת לא זמין כרגע, לא ניתן לברר את שיטת הכניסה. יש לנסות שוב מאוחר יותר.",
+    login_mock_banner: "כניסת פיתוח: זהות לדוגמה ללא סיסמה, לסביבת פיתוח בלבד. ההזדהות מול ספק הזהות הארגוני עדיין לא חוברה.",
+    login_as_manager: "כניסה כמנהל מחסן",
+    login_as_courier: "כניסה כמשנע",
+    login_cognito_missing: "השרת מוגדר להזדהות מול ספק הזהות הארגוני (Cognito), אבל החיבור אליו עדיין לא נבנה. אין אפשרות להיכנס מהמסך הזה.",
     role_manager: "מנהל מחסן",
     role_courier: "משנע",
 
@@ -31,6 +31,8 @@ export const he = {
     nav_issuances: "ניהול הנפקות",
     nav_couriers: "ניהול שליחים",
     nav_reports: "דוחות",
+    nav_courier_view: "מסך המשנע",
+    nav_manager_view: "מסך הניהול",
 
     // issuances board
     board_title: "לוח ניהול הנפקות",

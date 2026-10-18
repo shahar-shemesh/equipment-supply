@@ -1,38 +1,68 @@
 import { createContext, useContext, useEffect, useState } from "react";
 
-import { IUser, UserRole } from "../../../shared/@core";
-import { clearSession, post, SessionEnd, TOKEN_KEY, USER_KEY } from "./service";
+import { AuthMode, IAuthUser, UserRole } from "../../../shared/@core";
+import { hasRole } from "../../../shared/auth";
+import { authProviderFor, SignInInput } from "../auth/provider";
+import { clearSession, get, SessionEnd, TOKEN_KEY, USER_KEY } from "./service";
 import { watchTokenExpiry } from "../courier/offline/identity";
 
-//dev-local auth only: username + password against the seeded accounts. the token is a plain jwt in localStorage.
-//when the production identity provider is decided this file is the place that changes on the client side
+//the session on the client: a jwt and the IAuthUser the server answered with, both in localStorage. which login the page
+//offers is the server's call (GET /api/auth/mode), the provider in auth/provider.ts does the sign in for that mode, and
+//the roles are read as given, never derived here
 type AuthCtx = {
-  user: IUser | null;
-  login: (username: string, password: string) => Promise<IUser>;
+  user: IAuthUser | null;
+  mode: AuthMode | null; //null while the mode request is in flight, or when it failed
+  modeError: boolean; //the mode request failed: the server is unreachable (or answered something else)
+  signIn: (input: SignInInput) => Promise<IAuthUser>;
   logout: (end?: SessionEnd) => void;
 };
 
 const Ctx = createContext<AuthCtx>(null);
+const MODE_RETRY_MS = 15_000;
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<IUser | null>(() => {
-    try {
-      return normalizeUser(JSON.parse(localStorage.getItem(USER_KEY) || "null"));
-    } catch (e) {
-      return null;
+  const [user, setUser] = useState<IAuthUser | null>(() => readStoredUser(true));
+  const [mode, setMode] = useState<AuthMode | null>(null);
+  const [modeError, setModeError] = useState(false);
+
+  //asked once, at mount: the mode is a property of the server, not of this build. a failed request is tried again when
+  //the network comes back, so a login page opened offline recovers without a reload
+  useEffect(() => {
+    let alive = true;
+    let retry: ReturnType<typeof setTimeout> | null = null;
+    function ask() {
+      if (retry) clearTimeout(retry);
+      retry = null;
+      get("/auth/mode")
+        .then((r) => {
+          if (!alive) return;
+          if (r?.mode === AuthMode.mock || r?.mode === AuthMode.cognito) {
+            setMode(r.mode);
+            setModeError(false);
+          } else failed();
+        })
+        .catch(() => alive && failed());
     }
-  });
+    //a server that is down while the browser is online fires no event: the page asks again by itself
+    function failed() {
+      setModeError(true);
+      retry = setTimeout(ask, MODE_RETRY_MS);
+    }
+    ask();
+    window.addEventListener("online", ask);
+    return () => {
+      alive = false;
+      if (retry) clearTimeout(retry);
+      window.removeEventListener("online", ask);
+    };
+  }, []);
 
   //a login or logout in another tab of the same browser: this tab follows it instead of staying on the old account with
   //the new account's token in storage (the courier screens restart their sync worker when the user changes)
   useEffect(() => {
     function onStorage(e: StorageEvent) {
       if (e.key !== USER_KEY && e.key !== null) return;
-      try {
-        setUser(normalizeUser(JSON.parse(localStorage.getItem(USER_KEY) || "null")));
-      } catch (err) {
-        setUser(null);
-      }
+      setUser(readStoredUser(false));
     }
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
@@ -47,13 +77,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return watchTokenExpiry(() => logout({ reason: "expired" }));
   }, [user]);
 
-  async function login(username: string, password: string) {
-    const res = await post("/auth/login", { username, password });
-    const u = normalizeUser(res.user);
+  //the provider of the running mode answers { token, user }; both are stored as given. without a known mode there is
+  //nothing to sign in against (the login page shows no button then), so this is a programming error, not a user one
+  async function signIn(input: SignInInput) {
+    if (!mode) throw new Error("auth mode is not known yet");
+    const res = await authProviderFor(mode).signIn(input);
+    if (typeof res?.token !== "string" || !isSession(res.user)) throw new Error("sign in answer is not a session");
     localStorage.setItem(TOKEN_KEY, res.token);
-    localStorage.setItem(USER_KEY, JSON.stringify(u));
-    setUser(u);
-    return u;
+    localStorage.setItem(USER_KEY, JSON.stringify(res.user));
+    setUser(res.user);
+    return res.user;
   }
 
   //`end` is the note for the login page (what was sent before a logout, or that the token expired)
@@ -62,16 +95,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   }
 
-  return <Ctx.Provider value={{ user, login, logout }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ user, mode, modeError, signIn, logout }}>{children}</Ctx.Provider>;
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/
 
-//the server now returns user.id next to the jwt's sub, but a session stored before that change has only sub. the offline
-//data layer keys everything by user.id, so fill it here once instead of teaching every reader about both names
-function normalizeUser(u: any): IUser | null {
-  if (!u) return null;
-  return { ...u, id: u.id ?? u.sub };
+//the stored user, or null. a session stored before the roles existed (one `role`, no `roles` array, the old jwt behind
+//it) is not a session: the guards read the array and the mock provider refuses a token without it, so the person
+//signs in again. `drop` removes such a leftover with its token, at mount only: the storage event path leaves the
+//other tab's write alone
+function readStoredUser(drop: boolean): IAuthUser | null {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(USER_KEY);
+    const u = JSON.parse(raw || "null");
+    if (isSession(u)) return u;
+  } catch (e) {
+    //junk in storage reads as no session
+  }
+  if (drop && raw) clearSession();
+  return null;
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//an id and at least one role the routes know. a list with neither would send the guards in circles between the two
+//homes (homeOf says /courier, the courier tree says homeOf), so it is not a session at all
+function isSession(u: any): u is IAuthUser {
+  return !!u && typeof u === "object" && u.id != null && Array.isArray(u.roles) && u.roles.some((r: any) => r === UserRole.manager || r === UserRole.courier);
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/
@@ -82,6 +133,8 @@ export function useAuth() {
 
 /*──────────────────────────────────────────────────────────────────────────*/
 
-export function homeOf(user: IUser) {
-  return user?.role === UserRole.courier ? "/courier" : "/manager/issuances";
+//where a signed in person lands: a manager (who holds the courier role too) on the board, everyone else on the courier
+//screens
+export function homeOf(user: IAuthUser | null | undefined) {
+  return hasRole(user, UserRole.manager) ? "/manager/issuances" : "/courier";
 }

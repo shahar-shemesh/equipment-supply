@@ -6,9 +6,9 @@ import { JwtService } from '@nestjs/jwt';
 import { DataSource } from 'typeorm';
 import { Client } from 'pg';
 import request from 'supertest';
-import * as bcrypt from 'bcryptjs';
 
 import { AppModule } from '../app.module';
+import { tokenFor } from './auth-helper';
 import { AttemptOutcome, IssuanceStatus, NonDeliveryReason, Priority, RecipientType, ReportConflictCode, TaskStatus, UserRole } from '../../../shared/@core';
 import { User, Courier, Issuance, DeliveryTask, DeliveryAttempt, DeliveryOperation } from '../entities';
 import { SAMPLE_SIGNATURE } from '../seed/seed.data';
@@ -73,11 +73,10 @@ const OTHER_SIGNATURE = 'data:image/png;base64,' + Buffer.from([0x89, 0x50, 0x4e
 //one manager, two couriers with a login, each with one assigned issuance. the first issuance has two lines
 async function fixture(): Promise<Fixture> {
     await ds.query('TRUNCATE TABLE xml_outbox, audit_log, delivery_conflicts, delivery_operations, delivery_attempt_items, delivery_attempts, delivery_tasks, issuance_items, issuances, couriers, users RESTART IDENTITY CASCADE');
-    const hash = await bcrypt.hash('1234', 4);
 
-    await ds.getRepository(User).save({ username: 'm', password_hash: hash, display_name: 'manager', role: UserRole.manager });
-    const courierUser = await ds.getRepository(User).save({ username: 'c', password_hash: hash, display_name: 'courier', role: UserRole.courier });
-    const otherUser = await ds.getRepository(User).save({ username: 'c2', password_hash: hash, display_name: 'courier two', role: UserRole.courier });
+    await ds.getRepository(User).save({ username: 'm', display_name: 'manager', role: UserRole.manager });
+    const courierUser = await ds.getRepository(User).save({ username: 'c', display_name: 'courier', role: UserRole.courier });
+    const otherUser = await ds.getRepository(User).save({ username: 'c2', display_name: 'courier two', role: UserRole.courier });
     const courier = await ds.getRepository(Courier).save({ name: 'courier one', user_id: courierUser.id });
     const otherCourier = await ds.getRepository(Courier).save({ name: 'courier two', user_id: otherUser.id });
 
@@ -106,9 +105,9 @@ async function fixture(): Promise<Fixture> {
     } as any);
     const otherTask = await ds.getRepository(DeliveryTask).save({ issuance_id: otherIssuance.id, courier_id: otherCourier.id, status: TaskStatus.pending });
 
-    const managerToken = (await request(app.getHttpServer()).post('/api/auth/login').send({ username: 'm', password: '1234' })).body.token;
-    const courierToken = (await request(app.getHttpServer()).post('/api/auth/login').send({ username: 'c', password: '1234' })).body.token;
-    const otherToken = (await request(app.getHttpServer()).post('/api/auth/login').send({ username: 'c2', password: '1234' })).body.token;
+    const managerToken = await tokenFor(app, 'm');
+    const courierToken = await tokenFor(app, 'c');
+    const otherToken = await tokenFor(app, 'c2');
     expect(managerToken).toBeTruthy();
     expect(courierToken).toBeTruthy();
     expect(otherToken).toBeTruthy();
@@ -410,7 +409,7 @@ describe('an expired token', () => {
     it('is a 401 that writes nothing; the same operation id under a fresh token is a first send, then a replay', async () => {
         const f = await fixture();
         //signed by the app's own service with the app's secret, a minute in the past: what a tablet holds after a shift
-        const payload = { sub: f.courierUser.id, username: 'c', display_name: 'courier', role: UserRole.courier, courier_id: f.courier.id };
+        const payload = { sub: f.courierUser.id, username: 'c', name: 'courier', email: null, roles: [UserRole.courier], courier_id: f.courier.id };
         const expired = app.get(JwtService).sign(payload, { expiresIn: -60 });
         const body = { ...allDelivered(f), operation_id: OP_A, issuance_revision: 1 };
 
@@ -431,13 +430,24 @@ describe('an expired token', () => {
 });
 
 describe('identity', () => {
-    it('login and me return id next to sub', async () => {
+    it('the mock login and me answer the same IAuthUser: id (never sub), the role list and the courier row', async () => {
         const f = await fixture();
-        const login = await request(app.getHttpServer()).post('/api/auth/login').send({ username: 'c', password: '1234' });
-        expect(login.body.user).toMatchObject({ id: f.courierUser.id, sub: f.courierUser.id, courier_id: f.courier.id });
+        //the fixture's users are not the mock identities: the courier identity maps to courier1 (auth/mock/mock-identities.ts)
+        const user = await ds.getRepository(User).save({ username: 'courier1', display_name: 'יוסי', role: UserRole.courier });
+        const courier = await ds.getRepository(Courier).save({ name: 'יוסי', user_id: user.id });
+        const login = await request(app.getHttpServer()).post('/api/auth/mock/login').send({ identity: 'courier' });
+        expect(login.status).toBe(201);
+        const expected = { id: user.id, username: 'courier1', name: 'יוסי', email: null, roles: [UserRole.courier], courier_id: courier.id };
+        expect(login.body.user).toEqual(expected);
+        expect(login.body.token).toBeTruthy();
 
-        const me = await request(app.getHttpServer()).get('/api/auth/me').set('Authorization', `Bearer ${f.courierToken}`);
+        const me = await request(app.getHttpServer()).get('/api/auth/me').set('Authorization', `Bearer ${login.body.token}`);
         expect(me.status).toBe(200);
-        expect(me.body).toMatchObject({ id: f.courierUser.id, sub: f.courierUser.id, courier_id: f.courier.id });
+        expect(me.body).toEqual(expected);
+
+        //the token the helper signed for the fixture's courier reads back the same way: what the tablet keys its
+        //local storage on (id, courier_id) is in both
+        const own = await request(app.getHttpServer()).get('/api/auth/me').set('Authorization', `Bearer ${f.courierToken}`);
+        expect(own.body).toEqual({ id: f.courierUser.id, username: 'c', name: 'courier', email: null, roles: [UserRole.courier], courier_id: f.courier.id });
     });
 });

@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable, Logger, NotFoundExc
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository } from 'typeorm';
 
-import { AuditAction, AuditEntityType, IssuanceSortKey, IssuanceStatus, Priority, TaskStatus } from '../../../shared/@core';
+import { AuditAction, AuditEntityType, IAuthUser, IssuanceSortKey, IssuanceStatus, Priority, TaskStatus } from '../../../shared/@core';
 import { Issuance, IssuanceItem, DeliveryTask, DeliveryAttempt, Courier } from '../entities';
 import { AuditService } from '../audit/audit.service';
 import { changesBetween, snapshot } from '../audit/audit.diff';
@@ -172,7 +172,7 @@ export class IssuancesService {
   //as a courier report does. self_pickup stays true, the manager from the token is recorded as the one who delivered.
   //online only, so no operation id, no revision check and no replay: a second report finds the issuance delivered / not
   //delivered and gets the 409 of the transition table. validation first, outside the transaction, like delivery.service
-  async reportSelfPickup(id: number, body: any, user: any) {
+  async reportSelfPickup(id: number, body: any, user: IAuthUser) {
     const issuance = await this.issuances.findOne({ where: { id }, relations: { items: true }, order: { items: { line_no: 'ASC' } } });
     if (!issuance) throw new NotFoundException(`issuance ${id} not found`);
 
@@ -194,7 +194,7 @@ export class IssuancesService {
 
       //the task is born closed: the handover is the delivery, there was never anything to drive. courier_id null keeps
       //it off every courier board (delivery.service filters by courier_id)
-      const task = await em.save(em.create(DeliveryTask, { issuance_id: id, courier_id: null, status: TaskStatus.done, closed_at: new Date(), scheduled_date: locked.delivery_date || null, assigned_by: user?.sub ?? null }));
+      const task = await em.save(em.create(DeliveryTask, { issuance_id: id, courier_id: null, status: TaskStatus.done, closed_at: new Date(), scheduled_date: locked.delivery_date || null, assigned_by: user?.id ?? null }));
       const attempt = em.create(DeliveryAttempt, {
         task_id: task.id,
         outcome,
@@ -208,12 +208,12 @@ export class IssuancesService {
       await em.save(attempt);
 
       //em.update and not save: the locked entity has no relations loaded and a save would null what it does not know
-      await em.update(Issuance, id, { status: outcome as any, revision: locked.revision + 1, delivered_by_user_id: user.sub });
+      await em.update(Issuance, id, { status: outcome as any, revision: locked.revision + 1, delivered_by_user_id: user.id });
       await this.audit.record(em, { actor: user, action: AuditAction.issuance_self_pickup_report, entity_type: AuditEntityType.issuance, entity_id: id, issuance_id: id, details: { task_id: task.id, attempt_id: attempt.id, outcome, items_delivered: answers.filter((a) => a.delivered).length, items_total: answers.length, revision: locked.revision + 1 } });
       //the xml export row, after the audit row, on the same transaction (xml-export/). the snapshot is the state after
       //the update above, which the locked entity does not reflect
       await this.outbox.record(em, { issuance: { ...locked, revision: locked.revision + 1 }, from: locked.status, to: outcome as any, actor: user, trigger: AuditAction.issuance_self_pickup_report, details: { task_id: task.id, attempt_id: attempt.id, items_delivered: answers.filter((a) => a.delivered).length, items_total: answers.length } });
-      this.logger.log(`issuance ${locked.sap_number} handed over at the warehouse (${outcome}) by user ${user?.sub}, task ${task.id}`);
+      this.logger.log(`issuance ${locked.sap_number} handed over at the warehouse (${outcome}) by user ${user?.id}, task ${task.id}`);
     });
 
     return this.findOne(id);
@@ -223,7 +223,7 @@ export class IssuancesService {
 
   // PATCH /api/issuances/:id - priority, delivery_date, notes, self_pickup.
   //nothing else is editable from here, the customer / items / address belong to the SAP document
-  async update(id: number, body: any, user: any) {
+  async update(id: number, body: any, user: IAuthUser) {
     const priority = body?.priority;
     if (priority && !Object.values(Priority).includes(priority)) throw new BadRequestException(`unknown priority ${priority}`);
 
@@ -256,7 +256,7 @@ export class IssuancesService {
         //a handover that collected nothing can come back here: nobody delivered yet, so nobody is recorded
         issuance.delivered_by_user_id = null;
         await cancelOpenTasks(em, id);
-        this.logger.log(`issuance ${issuance.sap_number} moved to self pickup by user ${user?.sub}`);
+        this.logger.log(`issuance ${issuance.sap_number} moved to self pickup by user ${user?.id}`);
       }
 
       await em.save(issuance);
@@ -283,7 +283,7 @@ export class IssuancesService {
   //closed rows are skipped, not an error: the bar action is a bulk shortcut and the count tells the manager what happened.
   //the open rows are locked in id order like assign does, then updated in one statement as before. the count stays the
   //number of editable rows (the board relies on it); the audit rows are only for the ones whose priority really moved
-  async setPriority(ids: number[], priority: Priority, user: any) {
+  async setPriority(ids: number[], priority: Priority, user: IAuthUser) {
     if (!ids.length) return { updated: 0 };
     if (!Object.values(Priority).includes(priority)) throw new BadRequestException(`unknown priority ${priority}`);
 
@@ -321,7 +321,7 @@ export class IssuancesService {
   //one task per issuance. a previous open task is cancelled, not edited, so "who had it before" stays in the table.
   //all or nothing: one issuance that may not be assigned (delivered, deleted, partially delivered...) fails the whole batch
   //with 409 and nothing is written. ids are locked in ascending order so two managers with overlapping batches cannot deadlock
-  async assign(ids: number[], courierId: number, scheduledDate: string, user: any) {
+  async assign(ids: number[], courierId: number, scheduledDate: string, user: IAuthUser) {
     if (!ids.length) throw new BadRequestException('no issuances selected');
     if (scheduledDate && !isIsoDate(scheduledDate)) throw new BadRequestException('scheduled_date must be yyyy-mm-dd');
 
@@ -343,7 +343,7 @@ export class IssuancesService {
         const fromStatus = issuance.status;
 
         await cancelOpenTasks(em, id);
-        const task = await em.save(em.create(DeliveryTask, { issuance_id: id, courier_id: courierId, scheduled_date: scheduledDate || issuance.delivery_date || null, assigned_by: user?.sub ?? null }));
+        const task = await em.save(em.create(DeliveryTask, { issuance_id: id, courier_id: courierId, scheduled_date: scheduledDate || issuance.delivery_date || null, assigned_by: user?.id ?? null }));
 
         issuance.status = IssuanceStatus.assigned;
         issuance.self_pickup = false;
@@ -368,7 +368,7 @@ export class IssuancesService {
 
   // DELETE /api/issuances/:id { reason }
   //soft delete. the design asks for a reason and warns it cannot be undone, so the row keeps deleted_at + delete_reason
-  async softDelete(id: number, reason: string, user: any) {
+  async softDelete(id: number, reason: string, user: IAuthUser) {
     if (reason != null && (typeof reason !== 'string' || reason.length > 500)) throw new BadRequestException('reason must be a string up to 500 chars');
 
     await this.issuances.manager.transaction(async (em) => {
@@ -387,7 +387,7 @@ export class IssuancesService {
       //the xml export row, after the audit row, on the same transaction (xml-export/)
       await this.outbox.record(em, { issuance, from: fromStatus, to: IssuanceStatus.deleted, actor: user, trigger: AuditAction.issuance_delete, details: { reason: issuance.delete_reason } });
 
-      this.logger.warn(`issuance ${issuance.sap_number} deleted by user ${user?.sub}, reason: ${issuance.delete_reason || '-'}`);
+      this.logger.warn(`issuance ${issuance.sap_number} deleted by user ${user?.id}, reason: ${issuance.delete_reason || '-'}`);
     });
 
     return { deleted: id };
@@ -401,7 +401,7 @@ export class IssuancesService {
   //no lines, so an empty issuance could never be delivered, the manager deletes it instead. the revision moves and the
   //open task stays, so a report the tablet signed against the old line set meets the 409 of delivery.service and a
   //courier who refreshes simply sees one line less. allowed from the edit statuses (shared/@rules.ts, open decision 14)
-  async removeItem(id: number, itemId: number, user: any) {
+  async removeItem(id: number, itemId: number, user: IAuthUser) {
     if (!isId(id)) throw new BadRequestException('issuance id must be a positive integer');
     if (!isId(itemId)) throw new BadRequestException('item id must be a positive integer');
 
@@ -422,7 +422,7 @@ export class IssuancesService {
       await em.update(IssuanceItem, itemId, { removed_at: new Date() });
       await em.update(Issuance, id, { revision: issuance.revision + 1 });
       await this.audit.record(em, { actor: user, action: AuditAction.issuance_remove_item, entity_type: AuditEntityType.issuance, entity_id: id, issuance_id: id, details: { item_id: itemId, line_no: item.line_no, product_name: item.product_name, items_left: live - 1, revision: issuance.revision + 1 } });
-      this.logger.log(`issuance ${issuance.sap_number} line ${item.line_no} (${item.product_name}) removed by user ${user?.sub}, ${live - 1} left`);
+      this.logger.log(`issuance ${issuance.sap_number} line ${item.line_no} (${item.product_name}) removed by user ${user?.id}, ${live - 1} left`);
     });
 
     return this.findOne(id);

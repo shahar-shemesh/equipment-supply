@@ -90,12 +90,30 @@ export enum EvidenceUploadState {
 
 /*──────────────────────────────────────────────────────────────────────────*/
 
-export interface IUser {
-  id: number; //users.id. the jwt calls it sub, auth.service.login returns both so the client never keys local storage on undefined
+// which login the server runs (AUTH_MODE, read in server/src/env.ts). the client asks GET /api/auth/mode instead of
+// guessing from its own build
+export enum AuthMode {
+  mock = "mock", //a signed jwt for one of the two predefined identities below, no password. LOCAL and test boxes only
+  cognito = "cognito", //the real identity provider (Entra ID through AWS Cognito), a documented boundary until it is wired
+}
+
+// the two buttons of the login page in mock mode. the server maps each key to a seeded users row
+// (server/src/auth/mock/mock-identities.ts) and derives everything else from it
+export enum MockIdentity {
+  manager = "manager",
+  courier = "courier",
+}
+
+// the signed in person, as req.user on the server and as the stored session on the client. roles come from the server
+// only (rolesOf in shared/auth.ts): a manager holds the courier role too and opens the courier screens without a second
+// login. the jwt keeps the id under sub, the server maps it back here
+export interface IAuthUser {
+  id: number; //users.id
   username: string;
-  display_name: string;
-  role: UserRole;
-  courier_id?: number; //filled in the jwt for courier accounts
+  name: string;
+  email: string | null;
+  roles: UserRole[];
+  courier_id: number | null; //the couriers row linked to this user, null when there is none (the delivery routes answer 403)
 }
 
 export interface ICourier {

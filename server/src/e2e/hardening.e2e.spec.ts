@@ -5,9 +5,9 @@ import { Test } from '@nestjs/testing';
 import { DataSource } from 'typeorm';
 import { Client } from 'pg';
 import request from 'supertest';
-import * as bcrypt from 'bcryptjs';
 
 import { AppModule } from '../app.module';
+import { tokenFor } from './auth-helper';
 import { IssuanceStatus, NonDeliveryReason, RecipientType, TaskStatus, UserRole } from '../../../shared/@core';
 import { User, Courier, Issuance, DeliveryTask, DeliveryAttempt } from '../entities';
 import { SAMPLE_SIGNATURE } from '../seed/seed.data';
@@ -51,10 +51,9 @@ type Fixture = { issuance: Issuance; task: DeliveryTask; otherCourier: Courier; 
 //one manager, one courier with a login, one courier without, one issuance with two lines assigned to the first courier
 async function fixture(): Promise<Fixture> {
     await ds.query('TRUNCATE TABLE xml_outbox, audit_log, delivery_conflicts, delivery_operations, delivery_attempt_items, delivery_attempts, delivery_tasks, issuance_items, issuances, couriers, users RESTART IDENTITY CASCADE');
-    const hash = await bcrypt.hash('1234', 4);
 
-    const manager = await ds.getRepository(User).save({ username: 'm', password_hash: hash, display_name: 'manager', role: UserRole.manager });
-    const courierUser = await ds.getRepository(User).save({ username: 'c', password_hash: hash, display_name: 'courier', role: UserRole.courier });
+    const manager = await ds.getRepository(User).save({ username: 'm', display_name: 'manager', role: UserRole.manager });
+    const courierUser = await ds.getRepository(User).save({ username: 'c', display_name: 'courier', role: UserRole.courier });
     const courier = await ds.getRepository(Courier).save({ name: 'courier one', user_id: courierUser.id });
     const otherCourier = await ds.getRepository(Courier).save({ name: 'courier two' });
 
@@ -73,8 +72,8 @@ async function fixture(): Promise<Fixture> {
     } as any);
     const task = await ds.getRepository(DeliveryTask).save({ issuance_id: issuance.id, courier_id: courier.id, status: TaskStatus.pending });
 
-    const managerToken = (await request(app.getHttpServer()).post('/api/auth/login').send({ username: 'm', password: '1234' })).body.token;
-    const courierToken = (await request(app.getHttpServer()).post('/api/auth/login').send({ username: 'c', password: '1234' })).body.token;
+    const managerToken = await tokenFor(app, 'm');
+    const courierToken = await tokenFor(app, 'c');
     expect(managerToken).toBeTruthy();
     expect(courierToken).toBeTruthy();
 

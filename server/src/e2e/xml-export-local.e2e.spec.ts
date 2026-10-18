@@ -9,9 +9,9 @@ import { Test } from '@nestjs/testing';
 import { DataSource } from 'typeorm';
 import { Client } from 'pg';
 import request from 'supertest';
-import * as bcrypt from 'bcryptjs';
 
 import { AppModule } from '../app.module';
+import { tokenFor } from './auth-helper';
 import { IssuanceStatus, TaskStatus, UserRole, XmlOutboxStatus } from '../../../shared/@core';
 import { User, Courier, Issuance, XmlOutbox } from '../entities';
 import { xmlExportConfig } from '../env';
@@ -75,12 +75,11 @@ async function fixture(): Promise<Fixture> {
     await ds.query('TRUNCATE TABLE xml_outbox, audit_log, delivery_conflicts, delivery_operations, delivery_attempt_items, delivery_attempts, delivery_tasks, issuance_items, issuances, couriers, users RESTART IDENTITY CASCADE');
     await rm(exportDir, { recursive: true, force: true });
     await mkdir(exportDir, { recursive: true });
-    const hash = await bcrypt.hash('1234', 4);
-    await ds.getRepository(User).save({ username: 'm', password_hash: hash, display_name: 'דנה', role: UserRole.manager });
+    await ds.getRepository(User).save({ username: 'm', display_name: 'דנה', role: UserRole.manager });
     const courier = await ds.getRepository(Courier).save({ name: 'courier one' });
-    const login = await request(app.getHttpServer()).post('/api/auth/login').send({ username: 'm', password: '1234' });
-    expect(login.body.token).toBeTruthy();
-    return { courier, managerToken: login.body.token };
+    const managerToken = await tokenFor(app, 'm');
+    expect(managerToken).toBeTruthy();
+    return { courier, managerToken };
 }
 
 function post(path: string, token: string, body: any) {

@@ -5,13 +5,13 @@ import * as dotenv from 'dotenv';
 import helmet from 'helmet';
 
 import { AppModule } from './app.module';
-import { assertSafeConfig } from './env';
+import { assertSafeConfig, authMode } from './env';
 
 dotenv.config({ path: '.env' });
 
 async function bootstrap() {
   const logger = new Logger('Main');
-  assertSafeConfig(logger); //throws before anything listens when the env is unsafe (dev auth / default secret outside LOCAL)
+  assertSafeConfig(logger); //throws before anything listens when the env is unsafe (mock auth / default secret outside LOCAL)
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
@@ -33,7 +33,7 @@ async function bootstrap() {
 
   const port = process.env.PORT || 3000;
   await app.listen(port);
-  logger.log(`NestJS is listening on port ${port}, auth strategy: ${process.env.AUTH_STRATEGY || 'dev-local'}`);
+  logger.log(`NestJS is listening on port ${port}, auth mode: ${authMode()}`);
 }
 
 bootstrap();

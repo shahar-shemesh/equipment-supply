@@ -27,7 +27,7 @@ describe('scrub', () => {
 describe('AuditService.record', () => {
     it('inserts the row on the given manager, actor copied and details scrubbed', async () => {
         const em: any = { insert: jest.fn().mockResolvedValue(undefined) };
-        await new AuditService(null as any).record(em, { actor: { sub: 7, username: 'm', role: UserRole.manager }, action: AuditAction.issuance_delete, entity_type: AuditEntityType.issuance, entity_id: 3, issuance_id: 3, details: { reason: 'r'.repeat(300), signature_png: 'iVBOR' } });
+        await new AuditService(null as any).record(em, { actor: { id: 7, username: 'm', roles: [UserRole.manager, UserRole.courier] }, action: AuditAction.issuance_delete, entity_type: AuditEntityType.issuance, entity_id: 3, issuance_id: 3, details: { reason: 'r'.repeat(300), signature_png: 'iVBOR' } });
         expect(em.insert).toHaveBeenCalledTimes(1);
         const [entity, row] = em.insert.mock.calls[0];
         expect(entity).toBe(AuditLog);

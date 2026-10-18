@@ -8,7 +8,7 @@ dotenv.config({ path: path.join(__dirname, '../../.env') });
 process.env.ENVIRONMENT = 'LOCAL';
 process.env.DB_SYNCHRONIZE = 'true';
 process.env.DB_NAME = process.env.DB_NAME_TEST || 'equipment_supply_test';
-process.env.AUTH_STRATEGY = 'dev-local';
+process.env.AUTH_MODE = 'mock';
 process.env.DB_LOGGING = '';
 //the xml export worker never starts under jest: xml-export.e2e.spec calls tick() on it against a fake storage. the
 //backend is the s3 one (a fake) whatever the developer's .env says; xml-export-local.e2e.spec sets its own after this

@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 
-import { AuditAction, AuditEntityType, ConflictReviewStatus, IAttemptResult, IConflictObserved, IConflictReceipt, IConflictStatus, IDeliveryConflict, IssuanceStatus, ReportConflictCode, TaskStatus } from '../../../shared/@core';
+import { AuditAction, AuditEntityType, ConflictReviewStatus, IAttemptResult, IAuthUser, IConflictObserved, IConflictReceipt, IConflictStatus, IDeliveryConflict, IssuanceStatus, ReportConflictCode, TaskStatus } from '../../../shared/@core';
 import { DeliveryAttempt, DeliveryConflict, DeliveryOperation, DeliveryTask, Issuance, User } from '../entities';
 import { AuditService } from '../audit/audit.service';
 import { lockIssuance } from '../issuances/issuances.service';
@@ -61,7 +61,7 @@ export class ConflictsService {
   //conflict), a stored conflict replays its receipt, a report that could still be applied is refused, anything else is
   //recorded with the authoritative state of that moment. the receipt says kind: "conflict_recorded" so the tablet never
   //mistakes it for a delivery result
-  async record(user: any, taskId: number, body: any): Promise<IConflictReceipt | (IAttemptResult & { kind: 'delivered' })> {
+  async record(user: IAuthUser, taskId: number, body: any): Promise<IConflictReceipt | (IAttemptResult & { kind: 'delivered' })> {
     const courierId = this.courierIdOf(user);
     const task = await this.tasks.findOne({ where: { id: taskId, courier_id: courierId }, relations: { issuance: true } });
     if (!task) throw new NotFoundException(`task ${taskId} not found for this courier`);
@@ -83,12 +83,12 @@ export class ConflictsService {
         const locked = await em.getRepository(DeliveryTask).createQueryBuilder('t').setLock('pessimistic_write').where('t.id = :id', { id: task.id }).getOne();
 
         //the operation was applied after all: the tablet lost the 201 and later read a retry's 409 as a rejection
-        const delivered = await em.findOne(DeliveryOperation, { where: { user_id: user.sub, operation_id: operationId } });
+        const delivered = await em.findOne(DeliveryOperation, { where: { user_id: user.id, operation_id: operationId } });
         if (delivered) {
           if (delivered.task_id !== task.id || delivered.payload_hash !== hash) throw conflict('operation id was already used with different content', ReportConflictCode.operation_reused);
           return { kind: 'delivered' as const, ...delivered.result, replayed: true };
         }
-        const stored = await em.findOne(DeliveryConflict, { where: { user_id: user.sub, operation_id: operationId } });
+        const stored = await em.findOne(DeliveryConflict, { where: { user_id: user.id, operation_id: operationId } });
         if (stored) return this.replay(stored, task.id, hash);
 
         const code = rejectionOf(locked, issuance, submittedRevision);
@@ -105,7 +105,7 @@ export class ConflictsService {
           attempt_id: last?.id ?? null,
         };
         const row = em.create(DeliveryConflict, {
-          user_id: user.sub,
+          user_id: user.id,
           courier_id: courierId,
           operation_id: operationId,
           task_id: task.id,
@@ -132,7 +132,7 @@ export class ConflictsService {
       //two identical uploads that slipped past the lock: the second insert hits the unique index after the rollback,
       //the plain repository answers with the row the first one committed
       if (!isConflictUniqueViolation(e)) throw e;
-      const stored = await this.conflicts.findOne({ where: { user_id: user.sub, operation_id: operationId } });
+      const stored = await this.conflicts.findOne({ where: { user_id: user.id, operation_id: operationId } });
       if (!stored) throw e;
       result = this.replay(stored, task.id, hash);
     }
@@ -171,11 +171,11 @@ export class ConflictsService {
   /*──────────────────────────────────────────────────────────────────────────*/
 
   // GET /api/delivery/conflicts?operation_ids=a,b  -  the courier's own evidence, review status only
-  async mine(user: any, raw: string): Promise<IConflictStatus[]> {
+  async mine(user: IAuthUser, raw: string): Promise<IConflictStatus[]> {
     this.courierIdOf(user);
     const ids = String(raw || '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 200);
     if (!ids.length) return [];
-    const rows = await this.conflicts.find({ where: { user_id: user.sub, operation_id: In(ids) }, select: { id: true, operation_id: true, received_at: true, review_status: true, reviewed_at: true } });
+    const rows = await this.conflicts.find({ where: { user_id: user.id, operation_id: In(ids) }, select: { id: true, operation_id: true, received_at: true, review_status: true, reviewed_at: true } });
     return rows.map((r) => ({ operation_id: r.operation_id, conflict_id: r.id, received_at: r.received_at.toISOString(), review_status: r.review_status, reviewed_at: r.reviewed_at ? r.reviewed_at.toISOString() : null }));
   }
 
@@ -239,7 +239,7 @@ export class ConflictsService {
   //marks the row reviewed with a note. the row is locked so two managers cannot interleave: the version the screen loaded
   //must still be the row's version, and a row another manager already reviewed answers 409 with that review instead of
   //taking a second note on top of it. the same manager sending the same note again gets the same answer (a lost response)
-  async review(id: number, user: any, body: any) {
+  async review(id: number, user: IAuthUser, body: any) {
     const note = typeof body?.note === 'string' ? body.note.trim() : '';
     if (!note) throw new BadRequestException('note is required');
     if (note.length > REVIEW_NOTE_MAX) throw new BadRequestException(`note is longer than ${REVIEW_NOTE_MAX} chars`);
@@ -251,18 +251,18 @@ export class ConflictsService {
       if (!row) throw new NotFoundException(`conflict ${id} not found`);
 
       if (row.review_status === ConflictReviewStatus.reviewed) {
-        if (row.reviewed_by === user.sub && row.review_note === note) return row;
+        if (row.reviewed_by === user.id && row.review_note === note) return row;
         throw conflict('already reviewed by another manager', 'review_conflict', { review: await this.reviewOf(row) });
       }
       if (row.review_version !== version) throw conflict('the report changed since the screen loaded it', 'review_conflict', { review: await this.reviewOf(row) });
 
-      await em.update(DeliveryConflict, { id }, { review_status: ConflictReviewStatus.reviewed, reviewed_by: user.sub, reviewed_at: new Date(), review_note: note, review_version: row.review_version + 1 });
+      await em.update(DeliveryConflict, { id }, { review_status: ConflictReviewStatus.reviewed, reviewed_by: user.id, reviewed_at: new Date(), review_note: note, review_version: row.review_version + 1 });
       //only the write gets a row: the same manager repeating the same note returned above without changing anything
       await this.audit.record(em, { actor: user, action: AuditAction.delivery_conflict_review, entity_type: AuditEntityType.delivery_conflict, entity_id: id, issuance_id: row.issuance_id, details: { review_version: row.review_version + 1 } });
       return em.getRepository(DeliveryConflict).findOne({ where: { id } });
     });
 
-    this.logger.log(`conflict ${id} marked reviewed by user ${user?.sub}`);
+    this.logger.log(`conflict ${id} marked reviewed by user ${user?.id}`);
     const names = await this.reviewerNames([updated]);
     return this.toDto(updated, names);
   }
@@ -300,7 +300,7 @@ export class ConflictsService {
 
   /*──────────────────────────────────────────────────────────────────────────*/
 
-  private courierIdOf(user: any) {
+  private courierIdOf(user: IAuthUser) {
     if (!user?.courier_id) throw new ForbiddenException('this account is not linked to a courier');
     return +user.courier_id;
   }

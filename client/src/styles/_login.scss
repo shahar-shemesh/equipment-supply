@@ -32,24 +32,21 @@
         font-weight: 600;
     }
 
-    &__dev {
-        margin-top: 8px;
-        border-top: 1px solid var(--color-border);
-        padding-top: 16px;
-        font-size: 14px;
+    // the two identity buttons of mock mode, stacked and tall enough for a thumb on the tablet
+    &__identities {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
 
-        ul {
-            margin: 8px 0 0;
-            padding-inline-start: 18px;
-        }
-
-        li {
-            margin: 4px 0;
+        .MuiButton-root {
+            min-height: 56px;
+            font-size: 18px;
         }
     }
 
-    &__dev-title {
-        margin-top: 12px;
+    &__loading {
+        margin: 0;
         color: var(--color-text-secondary);
+        text-align: center;
     }
 }

@@ -1,4 +1,4 @@
-import { AttemptOutcome, EvidenceUploadState, IAttemptResult, IConflictReceipt, IDeliveryAttempt, IDeliveryTask, IUser, RecipientType, ReportConflictCode, ReportSyncState, TaskStatus } from "../../../../shared/@core";
+import { AttemptOutcome, EvidenceUploadState, IAttemptResult, IConflictReceipt, IDeliveryAttempt, IDeliveryTask, IAuthUser, RecipientType, ReportConflictCode, ReportSyncState, TaskStatus } from "../../../../shared/@core";
 import { compareTasksForBoard, normalizeSapNumber } from "../../../../shared/@utils";
 import { DraftRow, LocalReport, MetaRow, ReportEvidence, ReportSync, TaskDetailRow, TaskRow, openCourierDb, scopeRange, storageError, writeTx } from "./db";
 import { newOperationId } from "./uuid";
@@ -419,7 +419,7 @@ export function outcomeOf(items: { delivered?: boolean }[]): AttemptOutcome {
 //  { fields }             the validation map of validateReportForm (nothing written)
 //  { blocked: "locked" }  the task already has a report in queued / syncing / synced / auth (nothing written)
 //  { storage: key }       the write failed, key is storage_quota / storage_unavailable / local_save_failed (nothing written)
-export async function submitReport(scope: string, user: IUser, task: IDeliveryTask, form: ReportForm): Promise<LocalReport> {
+export async function submitReport(scope: string, user: IAuthUser, task: IDeliveryTask, form: ReportForm): Promise<LocalReport> {
   assertScope(scope);
   const fields = validateReportForm(task, form);
   if (Object.keys(fields).length) throw { fields };
@@ -488,7 +488,7 @@ export async function submitReport(scope: string, user: IUser, task: IDeliveryTa
       await tx.objectStore("drafts").delete([scope, task.id]);
       const metaStore = tx.objectStore("meta");
       const meta: MetaRow = (await metaStore.get(scope)) || metaFromScope(scope);
-      await metaStore.put({ ...meta, username: user.username || meta.username, display_name: user.display_name || meta.display_name });
+      await metaStore.put({ ...meta, username: user.username || meta.username, display_name: user.name || meta.display_name });
     });
   } catch (e) {
     if (e?.blocked) throw e;

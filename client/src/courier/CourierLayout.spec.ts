@@ -13,7 +13,7 @@ import CourierLayout from "./CourierLayout";
 //session end and cleanup. the worker is a mock (the layout starts it with nothing to inject), the store is fake-indexeddb
 
 const mocks = vi.hoisted(() => ({
-  user: { id: 7, username: "dan", display_name: "דן משנע", role: "courier", courier_id: 3 },
+  user: { id: 7, username: "dan", name: "דן משנע", email: null, roles: ["courier"], courier_id: 3 },
   rows: [] as any[],
   navigate: vi.fn(),
   logout: vi.fn(),
@@ -26,7 +26,7 @@ const mocks = vi.hoisted(() => ({
   seenAtLogout: null as Promise<any[]> | null,
 }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
-vi.mock("react-router-dom", () => ({ useNavigate: () => mocks.navigate, Link: ({ children }: any) => createElement("a", null, children), Outlet: () => null }));
+vi.mock("react-router-dom", () => ({ useNavigate: () => mocks.navigate, Link: ({ children, to, className }: any) => createElement("a", { href: to, className }, children), Outlet: () => null }));
 vi.mock("../utils/auth", () => ({ useAuth: () => ({ user: mocks.user, logout: mocks.logout }) }));
 vi.mock("./components/SyncStatusBar", () => ({ SyncStatusBar: () => null }));
 vi.mock("./offline/storage", () => ({ requestPersistentStorage: () => Promise.resolve(null) }));
@@ -105,6 +105,7 @@ async function click(button: Element | null | undefined) {
 }
 
 const headerLogout = () => host.querySelector(".app-header__logout");
+const managerLink = () => host.querySelector(".app-header__link");
 //the dialogs render in a portal under body; one is open at a time
 const dialog = () => document.querySelector(".confirm-dialog");
 const dialogButton = (label: string) => Array.from(dialog()?.querySelectorAll("button") || []).find((b) => b.textContent === label);
@@ -186,6 +187,8 @@ describe("courier logout", () => {
   it("with nothing on the device it leaves at once", async () => {
     await seed([]);
     await render();
+    //a courier holds no other screen to go to
+    expect(managerLink()).toBeNull();
 
     await click(headerLogout());
     await vi.waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith("/login"));
@@ -193,5 +196,21 @@ describe("courier logout", () => {
     expect(mocks.order).toEqual(["stop", "logout"]);
     expect(mocks.logout).toHaveBeenCalledWith({ reason: "logout", sent: 0 });
     expect(dialog()).toBeNull();
+  });
+});
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+describe("a manager on the courier screens", () => {
+  it("sees the link back to the board next to the logout", async () => {
+    mocks.user = { ...mocks.user, roles: ["manager", "courier"] } as any;
+    try {
+      await seed([]);
+      await render();
+      expect(managerLink()?.getAttribute("href")).toBe("/manager/issuances");
+      expect(managerLink()?.textContent).toBe("nav_manager_view");
+    } finally {
+      mocks.user = { ...mocks.user, roles: ["courier"] } as any;
+    }
   });
 });

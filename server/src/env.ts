@@ -1,7 +1,9 @@
 import * as path from 'path';
 
+import { AuthMode } from '../../shared/@core';
+
 //everything that decides "is this a developer's machine or a real environment" is here, so the dev-only switches
-//(dev accounts, default jwt secret, destructive seed, schema sync) all read the same answer.
+//(mock auth, default jwt secret, destructive seed, schema sync) all read the same answer.
 //ENVIRONMENT=LOCAL is an explicit opt in. a deploy that forgot its env file lands on the safe side
 
 export const DEV_JWT_SECRET = 'dev-only-secret-change-me';
@@ -12,9 +14,36 @@ export function isLocal() {
 
 /*──────────────────────────────────────────────────────────────────────────*/
 
-//ALLOW_DEV_AUTH=true is for a shared test box that has no real identity provider yet. logged loudly at startup
-export function devAuthAllowed() {
-  return isLocal() || process.env.ALLOW_DEV_AUTH === 'true';
+//AUTH_MODE picks the auth provider (auth/auth.module.ts): mock issues a signed jwt for one of two predefined identities,
+//cognito is the boundary for the real identity provider. unset is mock so a laptop needs no new variable; anything else
+//throws, a typo must not quietly run the mock on a real box
+export function authMode(): AuthMode {
+  const raw = (process.env.AUTH_MODE ?? '').trim();
+  if (raw === '') return AuthMode.mock;
+  if (raw === AuthMode.mock || raw === AuthMode.cognito) return raw;
+  throw new Error(`AUTH_MODE must be "mock" or "cognito" (unset means mock), got "${process.env.AUTH_MODE}"`);
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//ALLOW_MOCK_AUTH=true is for a shared test box that has no real identity provider yet. logged loudly at startup
+export function mockAuthAllowed() {
+  return isLocal() || process.env.ALLOW_MOCK_AUTH === 'true';
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+export type CognitoConfig = { region: string; userPoolId: string; clientId: string };
+
+//the three values the cognito provider verifies tokens against, once it does (auth/cognito/). read here only, and only
+//in cognito mode: a missing one is a startup error that names it, never a provider that silently trusts nothing
+export function cognitoConfig(): CognitoConfig {
+  const read = (name: string) => {
+    const value = (process.env[name] ?? '').trim();
+    if (!value) throw new Error(`${name} is required when AUTH_MODE=cognito`);
+    return value;
+  };
+  return { region: read('COGNITO_REGION'), userPoolId: read('COGNITO_USER_POOL_ID'), clientId: read('COGNITO_CLIENT_ID') };
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/
@@ -129,22 +158,24 @@ function wholeNumber(name: string, fallback: number, min: number) {
 //called once from main.ts before anything listens. throws on the combinations that must never run, warns on the ones
 //that are allowed but worth noticing in the log
 export function assertSafeConfig(logger: { log: (m: string) => void; warn: (m: string) => void }) {
-  const strategy = process.env.AUTH_STRATEGY || 'dev-local';
+  const mode = authMode(); //throws on an unknown mode
 
+  //the jwt module is registered in both modes (the mock provider signs with it), so the secret rule holds in both
   jwtSecret();
   const xml = xmlExportConfig(); //throws with the variable's name when the worker is on without a bucket or a region
 
-  if (strategy === 'dev-local' && !devAuthAllowed()) {
-    throw new Error('AUTH_STRATEGY=dev-local outside ENVIRONMENT=LOCAL. set ALLOW_DEV_AUTH=true only for a test box with no real identity provider yet');
+  if (mode === AuthMode.mock && !mockAuthAllowed()) {
+    throw new Error('AUTH_MODE=mock outside ENVIRONMENT=LOCAL. set ALLOW_MOCK_AUTH=true only for a test box with no real identity provider yet');
   }
-  if (strategy === 'dev-local' && !isLocal()) {
-    logger.warn('!!!! dev-local auth is enabled on a non local environment (ALLOW_DEV_AUTH=true) !!!!');
+  if (mode === AuthMode.mock && !isLocal()) {
+    logger.warn('!!!! mock auth is enabled on a non local environment (ALLOW_MOCK_AUTH=true) !!!!');
   }
+  if (mode === AuthMode.cognito) cognitoConfig(); //throws with the variable's name
   if (!isLocal() && process.env.DB_SYNCHRONIZE === 'true') {
     logger.warn('DB_SYNCHRONIZE is ignored outside LOCAL, the schema needs migrations');
   }
 
-  logger.log(`environment: ${isLocal() ? 'LOCAL' : process.env.ENVIRONMENT || '(unset)'}, auth: ${strategy}, schema sync: ${schemaSyncAllowed()}, seed allowed: ${destructiveSeedAllowed()}, xml export: ${xml.enabled ? xmlExportTarget(xml) : 'off'}`);
+  logger.log(`environment: ${isLocal() ? 'LOCAL' : process.env.ENVIRONMENT || '(unset)'}, auth: ${mode}, schema sync: ${schemaSyncAllowed()}, seed allowed: ${destructiveSeedAllowed()}, xml export: ${xml.enabled ? xmlExportTarget(xml) : 'off'}`);
 }
 
 //"local <dir>" or "s3 <bucket>/<prefix>", for the startup lines of main.ts and of the worker
