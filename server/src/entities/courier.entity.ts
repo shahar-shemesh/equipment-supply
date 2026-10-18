@@ -30,8 +30,11 @@ export class Courier {
   @Column({ default: true })
   active: boolean; //false = deleted on the management screen. the row stays because delivery_tasks point at it
 
-  @Column({ nullable: true })
-  user_id: number; //users.id of the login account, null until the courier gets one
+  //users.id of the login account, null until the courier gets one. unique: one account holds one courier row at most,
+  //the courier operations resolve the row from the account on every call (delivery/courier-identity.service.ts) and the
+  //tablet keys its offline data by the pair. null stays repeatable (a courier without a login). migration 1791500000000
+  @Column({ nullable: true, unique: true })
+  user_id: number;
 
   @OneToMany(() => DeliveryTask, (t) => t.courier)
   tasks: DeliveryTask[];

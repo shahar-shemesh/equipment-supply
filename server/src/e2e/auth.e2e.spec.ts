@@ -206,7 +206,8 @@ describe('the global guard', () => {
             request(app.getHttpServer()).post(`/api/delivery/tasks/${taskId}/conflicts`).set('Authorization', `Bearer ${token}`).send({}),
         ];
         for (const res of await Promise.all(refused)) {
-            expect([res.status, res.body.message]).toEqual([403, 'this account is not linked to a courier']);
+            //the code is what the tablet stops its worker on (offline sync), the message what a person reads
+            expect([res.status, res.body.message, res.body.code]).toEqual([403, 'this account is not linked to a courier', 'courier_unlinked']);
         }
         expect((await get(`/api/issuances/${f.issuance.id}`, token)).status).toBe(200);
         expect((await get('/api/conflicts', token)).status).toBe(200);
@@ -224,11 +225,21 @@ describe('the global guard', () => {
         expect(tasks.status).toBe(200);
         expect(JSON.stringify(tasks.body)).toContain('7100002');
         expect(JSON.stringify(tasks.body)).not.toContain(f.issuance.sap_number);
-        //the token still says null: the claim is the client's hint, the answer of /me is the login's snapshot as well
-        expect((await get('/api/auth/me', token)).body.courier_id).toBeNull();
+        //the token still says null (the claim is the login's snapshot); /me answers the row of the moment, which is how
+        //the tablet learns the new scope without a new sign in
+        expect((await get('/api/auth/me', token)).body).toMatchObject({ id: f.solo.id, courier_id: row.id, roles: [UserRole.manager, UserRole.courier] });
 
         await ds.getRepository(Courier).update(row.id, { user_id: null });
         expect((await get('/api/delivery/tasks', token)).status).toBe(403);
+        expect((await get('/api/auth/me', token)).body.courier_id).toBeNull();
+        //an account that is gone ends the session
+        await ds.getRepository(User).delete(f.solo.id);
+        expect((await get('/api/auth/me', token)).status).toBe(401);
+    });
+
+    it('one courier row per account: a second link is refused by the database', async () => {
+        const f = await fixture();
+        await expect(ds.getRepository(Courier).save({ name: 'second row', user_id: f.courierUser.id })).rejects.toThrow(/duplicate key/);
     });
 
     it('the mock token is checked for signature, issuer, algorithm and expiry, not only for its shape', async () => {

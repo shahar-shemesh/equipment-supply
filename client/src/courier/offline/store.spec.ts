@@ -29,7 +29,8 @@ const draft = (png = PNG) => ({ answers: { 11: { delivered: true } }, recipient_
 describe("scope partitioning", () => {
   it("two scopes never see each other's rows", async () => {
     const t1 = makeTask(1);
-    const t2 = makeTask(2);
+    //the other scope's row: a list refresh refuses rows of another courier row (scope_mismatch)
+    const t2 = { ...makeTask(2), courier_id: 4 };
     await refresh(SCOPE, async () => snapshot([t1]));
     await refresh(OTHER_SCOPE, async () => snapshot([t2]));
     await submitReport(SCOPE, courierUser, t1, fullForm(t1));

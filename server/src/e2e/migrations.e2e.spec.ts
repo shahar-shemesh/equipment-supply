@@ -6,6 +6,7 @@ import { DataSource } from 'typeorm';
 
 import { entities } from '../entities';
 import { AuthMockIdentities1791400000000 } from '../migrations/1791400000000-AuthMockIdentities';
+import { COURIERS_USER_UNIQUE, CourierUserUnique1791500000000 } from '../migrations/1791500000000-CourierUserUnique';
 
 //the migrations against a database of their own (docker compose up -d first). the base tables have no migration (the
 //first deployment ran synchronize, docs/domain.md), so the harness builds the current schema from the entities, puts
@@ -69,13 +70,16 @@ async function pendingSchemaChanges() {
     return sql.upQueries.map((q) => q.query);
 }
 
-//one case, in order: the state of each step is the next step's input. the last migration is the one under test; when a
-//later one arrives this case moves to a down of its own and the newcomer gets the "last" seat
+async function constraintExists(name: string) {
+    const rows = await ds.query(`SELECT 1 FROM pg_constraint WHERE conname = $1`, [name]);
+    return rows.length > 0;
+}
+
+//one case per migration that moves data, in order: the state of each step is the next step's input. the whole list is
+//run once by the first case (the runner, like migration:run); down and up of the migration under test go through its
+//class, so the migrations table and the later migrations stay out of it
 describe('AuthMockIdentities1791400000000', () => {
     it('upgrades a users table of the previous version with its rows to the exact shape of the entity, is a no-op the second time, and down takes the step back', async () => {
-        //the loaded list is not in timestamp order, the runner sorts by the number at the end of the name
-        const byTime = ds.migrations.map((m) => (m as any).name ?? m.constructor.name).sort((a, b) => +a.match(/\d+$/)[0] - +b.match(/\d+$/)[0]);
-        expect(byTime[byTime.length - 1]).toBe('AuthMockIdentities1791400000000');
 
         //the previous shape: password_hash not null, no email. down is the one place that knows it
         const qr = ds.createQueryRunner();
@@ -100,19 +104,52 @@ describe('AuthMockIdentities1791400000000', () => {
         expect(await ds.showMigrations()).toBe(false);
         expect(await ds.runMigrations()).toEqual([]);
 
-        //down restores the previous shape with the rows, up applies again
-        await ds.undoLastMigration({ transaction: 'all' });
-        const back = await columnsOfUsers();
-        expect(back.email).toBeUndefined();
-        expect(back.password_hash).toEqual({ nullable: false, def: "''::character varying" });
-        expect(await ds.query(`SELECT username, password_hash FROM users`)).toEqual([{ username: 'old-manager', password_hash: '' }]);
-        //and synchronize would now want the entity's shape back: the two are not in step until up runs again
-        expect(await pendingSchemaChanges()).not.toEqual(baseline);
-        expect(await ds.showMigrations()).toBe(true);
-
-        const again = await ds.runMigrations({ transaction: 'all' });
-        expect(again.map((m) => m.name)).toEqual(['AuthMockIdentities1791400000000']);
+        //down restores the previous shape with the rows, up applies again (the class itself: the migrations table and
+        //the later migrations stay out of it)
+        const qr2 = ds.createQueryRunner();
+        await qr2.connect();
+        try {
+            await new AuthMockIdentities1791400000000().down(qr2);
+            const back = await columnsOfUsers();
+            expect(back.email).toBeUndefined();
+            expect(back.password_hash).toEqual({ nullable: false, def: "''::character varying" });
+            expect(await ds.query(`SELECT username, password_hash FROM users`)).toEqual([{ username: 'old-manager', password_hash: '' }]);
+            //synchronize would now want the entity's shape back: the two are not in step until up runs again
+            expect(await pendingSchemaChanges()).not.toEqual(baseline);
+            await new AuthMockIdentities1791400000000().up(qr2);
+        } finally {
+            await qr2.release();
+        }
         expect((await columnsOfUsers()).password_hash).toBeUndefined();
+        expect(await pendingSchemaChanges()).toEqual(baseline);
+    });
+});
+
+describe('CourierUserUnique1791500000000', () => {
+    it('refuses a database with two courier rows for one account, names them, and adds the constraint synchronize knows once they are fixed', async () => {
+        const migration = new CourierUserUnique1791500000000();
+        const qr = ds.createQueryRunner();
+        await qr.connect();
+        try {
+            await migration.down(qr);
+            expect(await constraintExists(COURIERS_USER_UNIQUE)).toBe(false);
+            const [{ id: userId }] = await ds.query(`INSERT INTO users (username, display_name, role) VALUES ('two-rows', 'Two Rows', 'courier') RETURNING id`);
+            await ds.query(`INSERT INTO couriers (name, active, user_id) VALUES ('row one', true, $1), ('row two', true, $1), ('no login', true, NULL), ('no login either', true, NULL)`, [userId]);
+
+            await expect(migration.up(qr)).rejects.toThrow(`couriers.user_id is not unique, fix these rows before the migration: user ${userId} -> couriers `);
+            expect(await constraintExists(COURIERS_USER_UNIQUE)).toBe(false);
+
+            await ds.query(`UPDATE couriers SET user_id = NULL WHERE name = 'row two'`);
+            await migration.up(qr);
+            expect(await constraintExists(COURIERS_USER_UNIQUE)).toBe(true);
+            //the rows without a login stayed, two of them; a second link to the same account is refused from now on
+            expect(+(await ds.query(`SELECT count(*) AS n FROM couriers WHERE user_id IS NULL`))[0].n).toBe(3);
+            await expect(ds.query(`UPDATE couriers SET user_id = $1 WHERE name = 'row two'`, [userId])).rejects.toThrow(/duplicate key/);
+            //a second run finds the constraint and adds nothing
+            await migration.up(qr);
+        } finally {
+            await qr.release();
+        }
         expect(await pendingSchemaChanges()).toEqual(baseline);
     });
 });

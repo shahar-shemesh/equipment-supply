@@ -110,10 +110,12 @@ export function isSecureContext(): boolean {
 
 //true when the stored token belongs to the account the scope was made for. every background read of a scope checks it:
 //another courier signed in on this device (a second tab still shows the first one) must never refresh the first
-//courier's snapshot with their own list, the worker makes the same check before sending a report
+//courier's snapshot with their own list, the worker makes the same check before sending a report. the account only:
+//the courier row of a scope can change after the login (GET /api/auth/me, utils/auth.tsx refreshIdentity) while the
+//token keeps the row it was signed with, the account cannot
 export function tokenMatchesScope(scope: string | null | undefined, token: string | null | undefined = currentToken()): boolean {
   const p = decodeJwt(token);
   if (!p || !scope) return false;
-  const [userId, courierId] = scope.split(":");
-  return String(p.sub) === userId && String(p.courier_id ?? "") === courierId;
+  const [userId] = scope.split(":");
+  return String(p.sub) === userId;
 }

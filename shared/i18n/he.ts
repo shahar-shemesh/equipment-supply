@@ -298,6 +298,7 @@ export const he = {
     sync_syncing: "מסנכרן...",
     sync_all_synced: "כל הדוחות התקבלו בשרת",
     sync_auth_required: "נדרשת התחברות מחדש כדי לשלוח את הדוחות לשרת",
+    sync_identity_lost: "החשבון כבר אינו מקושר לרשומת משנע. השליחה הופסקה, הדוחות שנשמרו במכשיר נשמרים עד לבירור",
     sync_attention_count: "{{count}} דוחות דורשים טיפול",
     sync_attention_one: "דוח אחד דורש טיפול",
     sync_open_list: "דוחות שנשמרו במכשיר",

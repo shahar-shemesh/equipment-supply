@@ -34,6 +34,17 @@ const draft = { answers: {}, recipient_type: "customer" as any, recipient: { nam
 /*──────────────────────────────────────────────────────────────────────────*/
 
 describe("refresh", () => {
+  it("a list of another courier row (the account's row moved on the server) never lands under this scope", async () => {
+    expect(await refresh(SCOPE, async () => snapshot([makeTask(1)]))).toEqual({ ok: true });
+    expect(await refresh(SCOPE, async () => snapshot([{ ...makeTask(2), courier_id: 4 }, makeTask(3)]))).toEqual({ ok: false, error: "scope_mismatch" });
+    expect((await readBoard(SCOPE)).rows.map((r) => r.id)).toEqual([1]);
+    expect((await meta()).last_error).toBe("scope_mismatch");
+    expect(getSyncStatus().identity_lost).toBe(true);
+    //a handover task carries no courier_id and is not a sign of another row
+    expect(await refresh(SCOPE, async () => snapshot([makeTask(1), { ...makeTask(5), courier_id: null }]))).toEqual({ ok: true });
+    expect((await readBoard(SCOPE)).rows.map((r) => r.id)).toEqual([1, 5]);
+  });
+
   it("the default source refuses another account's token and leaves the snapshot alone", async () => {
     expect(await refresh(SCOPE, async () => snapshot([makeTask(1)]))).toEqual({ ok: true });
     const exp = Math.floor(Date.now() / 1000) + 3600;
@@ -45,10 +56,12 @@ describe("refresh", () => {
     expect((await meta()).last_error).toBe("auth_required");
     expect(getSyncStatus().auth_required).toBe(true);
 
-    //the guard itself: only the token of the scope's own user and courier passes (no request is made here, jsdom's
-    //location would reach a real port 3000)
+    //the guard itself: the token of the scope's own account passes, whatever courier row it was signed with (the row can
+    //change after the login, identity.ts); another account's does not (no request is made here, jsdom's location would
+    //reach a real port 3000)
     expect(tokenMatchesScope(SCOPE, makeToken({ sub: 7, courier_id: 3, exp }))).toBe(true);
-    expect(tokenMatchesScope(SCOPE, makeToken({ sub: 7, courier_id: 4, exp }))).toBe(false);
+    expect(tokenMatchesScope(SCOPE, makeToken({ sub: 7, courier_id: 4, exp }))).toBe(true);
+    expect(tokenMatchesScope(SCOPE, makeToken({ sub: 8, courier_id: 3, exp }))).toBe(false);
     expect(tokenMatchesScope(SCOPE, null)).toBe(false);
     localStorage.clear();
   });

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { makeToken, setToken } from "../../test/fixtures";
 import { TOKEN_KEY } from "../../utils/service";
-import { watchTokenExpiry } from "./identity";
+import { tokenMatchesScope, watchTokenExpiry } from "./identity";
 
 //the client side end of the session: the watcher fires once at exp, or on the first focus after it, and never for a
 //token that is still fresh or does not expire
@@ -24,6 +24,17 @@ afterEach(() => {
 });
 
 /*──────────────────────────────────────────────────────────────────────────*/
+
+describe("tokenMatchesScope", () => {
+  it("matches the account of the scope, not its courier row: the row can change after the login, the account cannot", () => {
+    const token = makeToken({ sub: 7, courier_id: 3, exp });
+    expect(tokenMatchesScope("7:3", token)).toBe(true);
+    expect(tokenMatchesScope("7:9", token)).toBe(true);
+    expect(tokenMatchesScope("8:3", token)).toBe(false);
+    expect(tokenMatchesScope(null, token)).toBe(false);
+    expect(tokenMatchesScope("7:3", "not-a-jwt")).toBe(false);
+  });
+});
 
 describe("watchTokenExpiry", () => {
   it("fires once at exp and not again on the focus after it", () => {

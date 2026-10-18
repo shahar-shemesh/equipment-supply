@@ -1,6 +1,6 @@
 import axios from "axios";
 
-import { AttemptOutcome, ConflictReviewStatus, EvidenceUploadState, IAttemptResult, IConflictReceipt, IConflictStatus, ReportConflictCode, ReportSyncState } from "../../../../shared/@core";
+import { AttemptOutcome, COURIER_UNLINKED_CODE, ConflictReviewStatus, EvidenceUploadState, IAttemptResult, IConflictReceipt, IConflictStatus, ReportConflictCode, ReportSyncState } from "../../../../shared/@core";
 import { currentToken, decodeJwt, tokenIsFresh } from "./identity";
 import { LocalReport } from "./db";
 import { clearForeignScopes, clearNetworkBackoff, closeChannel, countReports, evidenceDue, evidenceOf, listReports, markReportsAuth, needsAttention, postKick, releaseSyncLease, requeueAuth, retryAll, subscribe, takeSyncLease, updateReportEvidence, updateReportSync, emit } from "./store";
@@ -15,6 +15,9 @@ export type SyncStatus = {
   reachable: boolean | null; //what the last request said, the proof
   running: boolean;
   auth_required: boolean;
+  //a courier operation answered 403 courier_unlinked: the account holds no courier row any more. the worker idles (no
+  //pass until a start under another scope) and the queue stays exactly as it is; the layout refreshes the identity
+  identity_lost: boolean;
   pending: number; //queued + syncing + auth
   attention: number; //invalid + forbidden + conflicts a manager has not reviewed yet
   last_sync_at: string | null;
@@ -57,7 +60,7 @@ const defaultTransport: Transport = {
 };
 
 function initialStatus(scope: string | null): SyncStatus {
-  return { scope, online: typeof navigator === "undefined" ? true : navigator.onLine !== false, reachable: null, running: false, auth_required: false, pending: 0, attention: 0, last_sync_at: null, last_error: null };
+  return { scope, online: typeof navigator === "undefined" ? true : navigator.onLine !== false, reachable: null, running: false, auth_required: false, identity_lost: false, pending: 0, attention: 0, last_sync_at: null, last_error: null };
 }
 
 //one id per tab for the lease fallback
@@ -95,6 +98,7 @@ export async function offlineGet(path: string, params?: any): Promise<any> {
     return r.data;
   } catch (e: any) {
     if (e?.response?.status === 401) noteBackgroundResult("auth");
+    else if (e?.response?.status === 403 && e?.response?.data?.code === COURIER_UNLINKED_CODE) noteBackgroundResult("identity");
     else if (!e?.response) noteBackgroundResult("network");
     else noteBackgroundResult("ok");
     throw e;
@@ -104,10 +108,11 @@ export async function offlineGet(path: string, params?: any): Promise<any> {
 /*──────────────────────────────────────────────────────────────────────────*/
 
 //what a background request learned about the server, from this module or the data layer
-export function noteBackgroundResult(kind: "ok" | "network" | "auth") {
+export function noteBackgroundResult(kind: "ok" | "network" | "auth" | "identity") {
   if (kind === "ok") setStatus({ reachable: true, last_error: null });
   if (kind === "network") setStatus({ reachable: false });
   if (kind === "auth") setStatus({ reachable: true, auth_required: true });
+  if (kind === "identity") setStatus({ reachable: true, identity_lost: true });
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/
@@ -213,7 +218,8 @@ export function stopSync() {
   running = false;
   dirty = false;
   passPromise = null;
-  setStatus({ scope: null, running: false });
+  //the verdicts of the old scope do not outlive it: the next start reads a clean status
+  setStatus({ scope: null, running: false, auth_required: false, identity_lost: false });
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/
@@ -254,6 +260,12 @@ export function resetSyncForTests() {
 export async function kickSync(reason: KickReason): Promise<void> {
   if (!scope) return;
   const s = scope;
+  //no pass while the account holds no courier row: every request would be the same 403. a start under the new scope
+  //(the layout, after /me) or a logout ends the idle; the count still follows what the courier signs meanwhile
+  if (status.identity_lost) {
+    await refreshCounts(s).catch(() => {});
+    return;
+  }
   const gen = generation;
   try {
     if (RECONNECT_REASONS.includes(reason)) await clearNetworkBackoff(s);
@@ -472,6 +484,15 @@ async function classify(s: string, r: LocalReport, res: { status: number; data: 
     await parkForAuth(s, currentToken(), message);
     return "stop";
   }
+  //not a verdict on this report, a verdict on the identity: the account holds no courier row any more (unlinked by the
+  //manager, or moved to another row). the row goes back to queued as it was, the pass ends and the worker idles
+  //(kickSync) until the layout refreshes the identity. nothing on the device is touched: the queue is the only copy of
+  //what was signed, and what to do with it is a policy not written yet (docs/auth.md)
+  if (code === 403 && data?.code === COURIER_UNLINKED_CODE) {
+    await updateReportSync(s, r.operation_id, { state: ReportSyncState.queued, next_at: null, last_error: message, http_status: code });
+    setStatus({ identity_lost: true, last_error: message });
+    return "stop";
+  }
   if (code === 403 || code === 404) {
     await updateReportSync(s, r.operation_id, { state: ReportSyncState.forbidden, next_at: null, last_error: message, http_status: code });
     return ReportSyncState.forbidden;
@@ -553,6 +574,13 @@ async function processEvidence(gen: number, s: string, synced: { count: number }
 async function classifyEvidence(s: string, r: LocalReport, res: { status: number; data: any }, synced: { count: number }): Promise<boolean> {
   const { status: code, data } = res;
   const message = typeof data?.message === "string" ? data.message : Array.isArray(data?.message) ? data.message.join(", ") : null;
+
+  //the identity verdict, same as for a report: the evidence stays pending, the pass ends, the worker idles
+  if (code === 403 && data?.code === COURIER_UNLINKED_CODE) {
+    await updateReportEvidence(s, r.operation_id, { state: EvidenceUploadState.pending });
+    setStatus({ identity_lost: true, last_error: message });
+    return true;
+  }
 
   if (code >= 200 && code < 300) {
     if (data?.kind === "conflict_recorded" && typeof data.conflict_id === "number" && typeof data.received_at === "string") {

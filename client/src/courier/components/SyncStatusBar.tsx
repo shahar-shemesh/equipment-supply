@@ -67,10 +67,12 @@ export function SyncStatusBar() {
           {ready ? `${t("offline_ready")}, ${t("offline_refreshed_at", { time: refreshedLabel })}` : online ? t("offline_preparing") : t("offline_never_refreshed")}
         </span>
 
-        <button type="button" className={`sync-chip sync-chip--action ${refreshing ? "is-busy" : ""}`} disabled={!online || refreshing || !scope} onClick={refreshNow} title={t("offline_refresh")}>
+        <button type="button" className={`sync-chip sync-chip--action ${refreshing ? "is-busy" : ""}`} disabled={!online || refreshing || !scope || status.identity_lost} onClick={refreshNow} title={t("offline_refresh")}>
           <RefreshIcon fontSize="inherit" /> {t("offline_refresh")}
         </button>
         {refreshFailed && <span className="sync-chip sync-chip--warn">{t("offline_refresh_failed")}</span>}
+
+        {status.identity_lost && <span className="sync-chip sync-chip--warn">{t("sync_identity_lost")}</span>}
 
         {status.auth_required && (
           <button type="button" className="sync-chip sync-chip--warn sync-chip--action" onClick={reauth}>

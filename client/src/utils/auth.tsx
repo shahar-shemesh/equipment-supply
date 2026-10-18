@@ -15,6 +15,9 @@ type AuthCtx = {
   modeError: boolean; //the mode request failed: the server is unreachable (or answered something else)
   signIn: (input: SignInInput) => Promise<IAuthUser>;
   logout: (end?: SessionEnd) => void;
+  //the identity behind the token as the server holds it now (GET /api/auth/me): the stored user follows a courier row
+  //linked or unlinked since the login, the token stays. resolves with what is stored afterwards, null without a session
+  refreshIdentity: () => Promise<IAuthUser | null>;
 };
 
 const Ctx = createContext<AuthCtx>(null);
@@ -68,6 +71,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  //the identity is asked for at the start (the app opened, a tab reloaded) and when the network returns: a courier row
+  //linked or unlinked while the tablet was away shows without a new sign in. offline the login's snapshot stands
+  useEffect(() => {
+    if (!user) return;
+    const ask = () => {
+      refreshIdentity().catch(() => {});
+    };
+    if (navigator.onLine) ask();
+    window.addEventListener("online", ask);
+    return () => window.removeEventListener("online", ask);
+  }, [user?.id]);
+
   //the client side end of the 12 hour token: at exp, or on the first focus after it, the session is gone without a
   //request and the login page says so. no cleanup here (this provider has no scope and the manager has no database):
   //the courier layout unmounts through RequireRole and stops its worker, the same path as a logout made in another tab,
@@ -95,7 +110,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   }
 
-  return <Ctx.Provider value={{ user, mode, modeError, signIn, logout }}>{children}</Ctx.Provider>;
+  //what the server says the account is now. a changed answer replaces the stored user, so the offline scope (users.id +
+  //couriers.id, identity.ts) follows the row and the courier shell restarts its worker under the new one. a failed
+  //request rejects and writes nothing (offline, the snapshot of the login is the best there is; the callers decide);
+  //a 401 on the way is the interceptor's, the session ends there. the answer is written only for the session that
+  //asked: a logout, an expiry or another tab's sign in while the request was out leaves whatever they wrote alone, and
+  //an answer for another account or one that is not a session is ignored
+  async function refreshIdentity(): Promise<IAuthUser | null> {
+    const stored = readStoredUser(false);
+    if (!stored) return null;
+    const me: any = await get("/auth/me");
+    const current = readStoredUser(false);
+    if (!current || current.id !== stored.id) return current;
+    if (!isSession(me) || me.id !== current.id) return current;
+    const next: IAuthUser = { id: me.id, username: me.username, name: me.name, email: me.email ?? null, roles: me.roles, courier_id: me.courier_id ?? null };
+    if (JSON.stringify(next) === JSON.stringify({ ...current, email: current.email ?? null, courier_id: current.courier_id ?? null })) return current;
+    localStorage.setItem(USER_KEY, JSON.stringify(next));
+    setUser(next);
+    return next;
+  }
+
+  return <Ctx.Provider value={{ user, mode, modeError, signIn, logout, refreshIdentity }}>{children}</Ctx.Provider>;
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/

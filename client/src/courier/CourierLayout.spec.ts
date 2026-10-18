@@ -17,23 +17,25 @@ const mocks = vi.hoisted(() => ({
   rows: [] as any[],
   navigate: vi.fn(),
   logout: vi.fn(),
+  refreshIdentity: vi.fn(),
   startSync: vi.fn(),
   stopSync: vi.fn(),
   flushForLogout: vi.fn(),
   //the worker's status says nothing is pending whatever the database holds: the layout must not decide by it
-  status: { pending: 0, attention: 0 },
+  status: { pending: 0, attention: 0, identity_lost: false } as any,
   order: [] as string[],
   seenAtLogout: null as Promise<any[]> | null,
 }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock("react-router-dom", () => ({ useNavigate: () => mocks.navigate, Link: ({ children, to, className }: any) => createElement("a", { href: to, className }, children), Outlet: () => null }));
-vi.mock("../utils/auth", () => ({ useAuth: () => ({ user: mocks.user, logout: mocks.logout }) }));
+vi.mock("../utils/auth", () => ({ useAuth: () => ({ user: mocks.user, logout: mocks.logout, refreshIdentity: mocks.refreshIdentity }) }));
 vi.mock("./components/SyncStatusBar", () => ({ SyncStatusBar: () => null }));
 vi.mock("./offline/storage", () => ({ requestPersistentStorage: () => Promise.resolve(null) }));
 vi.mock("./offline/sync", () => ({
   startSync: mocks.startSync,
   stopSync: mocks.stopSync,
   getSyncStatus: () => ({ ...mocks.status }),
+  subscribeSync: () => () => {},
   flushForLogout: mocks.flushForLogout,
   //the store's background reads: the refresh on mount gets the seeded list back, so the snapshot stays what the test wrote
   offlineGet: () => Promise.resolve({ rows: mocks.rows, counts: { all: mocks.rows.length, pending: mocks.rows.length, done: 0 } }),
@@ -57,7 +59,10 @@ beforeEach(async () => {
   mocks.rows = [];
   mocks.order = [];
   mocks.seenAtLogout = null;
+  mocks.user = { id: 7, username: "dan", name: "דן משנע", email: null, roles: ["courier"], courier_id: 3 };
   mocks.navigate.mockReset();
+  mocks.refreshIdentity.mockReset().mockResolvedValue(null);
+  mocks.status = { pending: 0, attention: 0, identity_lost: false } as any;
   mocks.flushForLogout.mockReset();
   mocks.startSync.mockReset().mockResolvedValue(undefined);
   mocks.stopSync.mockReset().mockImplementation(() => mocks.order.push("stop"));
@@ -215,14 +220,18 @@ describe("a manager on the courier screens", () => {
     }
   });
 
-  it("without a courier row the screens open with the notice in place of the board, and no worker starts", async () => {
+  it("without a courier row the screens open with the notice in place of the board, the queue of the row it held is named, and no worker starts", async () => {
+    //what the account signed under its previous row is still on the device
+    await seed([ReportSyncState.queued]);
     const before = mocks.user;
     mocks.user = { ...mocks.user, roles: ["manager", "courier"], courier_id: null } as any;
     try {
       await render();
-      expect(host.querySelector(".courier-no-identity")?.textContent).toBe("courier_no_identity courier_no_identity_manager");
+      expect(host.querySelector(".courier-no-identity .MuiAlert-root")?.textContent).toBe("courier_no_identity courier_no_identity_manager");
+      await vi.waitFor(() => expect(host.querySelector(".courier-no-identity")?.textContent).toContain("sync_other_account_one"));
       expect(managerLink()).not.toBeNull();
       expect(mocks.startSync).not.toHaveBeenCalled();
+      expect(mocks.refreshIdentity).not.toHaveBeenCalled();
       //sign out with no scope leaves at once, nothing to flush or sweep
       await click(headerLogout());
       await vi.waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith("/login"));
@@ -230,5 +239,45 @@ describe("a manager on the courier screens", () => {
     } finally {
       mocks.user = before;
     }
+  });
+
+  it("a request that said the account lost its courier row makes the shell ask /auth/me again; the same row back restarts the worker once", async () => {
+    mocks.status = { pending: 1, attention: 0, identity_lost: true } as any;
+    mocks.refreshIdentity.mockResolvedValue(mocks.user);
+    await seed([]);
+    await render();
+    //the mount's start, then the one restart after the answer
+    await vi.waitFor(() => expect(mocks.startSync).toHaveBeenCalledTimes(2));
+    expect(mocks.refreshIdentity).toHaveBeenCalledTimes(1);
+    expect(mocks.startSync.mock.calls.map((c) => c[0])).toEqual([SCOPE, SCOPE]);
+  });
+
+  it("a row changed by /auth/me moves the scope: the old worker stops, a new one starts under the new row, no row ends in the notice", async () => {
+    await seed([]);
+    await render();
+    expect(mocks.startSync).toHaveBeenLastCalledWith(SCOPE, expect.anything());
+
+    mocks.user = { ...mocks.user, courier_id: 9 } as any;
+    await render();
+    expect(mocks.order).toEqual(["stop"]);
+    expect(mocks.startSync).toHaveBeenCalledTimes(2);
+    expect(mocks.startSync).toHaveBeenLastCalledWith("7:9", expect.anything());
+    expect(host.querySelector(".courier-no-identity")).toBeNull();
+
+    mocks.user = { ...mocks.user, courier_id: null } as any;
+    await render();
+    expect(mocks.order).toEqual(["stop", "stop"]);
+    expect(mocks.startSync).toHaveBeenCalledTimes(2);
+    expect(host.querySelector(".courier-no-identity")).not.toBeNull();
+  });
+
+  it("a failed /auth/me after a lost identity leaves the worker idle", async () => {
+    mocks.status = { pending: 1, attention: 0, identity_lost: true } as any;
+    mocks.refreshIdentity.mockRejectedValue(new Error("offline"));
+    await seed([]);
+    await render();
+    await vi.waitFor(() => expect(mocks.refreshIdentity).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(mocks.startSync).toHaveBeenCalledTimes(1);
   });
 });

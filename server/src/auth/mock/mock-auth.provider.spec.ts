@@ -4,6 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 
 import { MockIdentity, UserRole } from '../../../../shared/@core';
 import { MOCK_TOKEN_ISSUER, MockAuthProvider } from './mock-auth.provider';
+import { IdentityService } from '../identity.service';
 
 //the provider against stubs: the request time lock on the environment, the users row behind an identity, the claims
 //of the token it signs and what verify makes of them. the real route is covered by e2e/auth.e2e.spec.ts
@@ -18,7 +19,7 @@ function build(opts: { user?: any; courier?: any; jwt?: any } = {}) {
     const couriers = { findOne: jest.fn(async () => opts.courier ?? null) };
     const jwt = opts.jwt ?? { sign: jest.fn((claims: any) => `signed:${JSON.stringify(claims)}`), verify: jest.fn() };
     const audit = { recordDetached: jest.fn(async () => undefined) };
-    const provider = new MockAuthProvider(users as any, couriers as any, jwt as any, audit as any);
+    const provider = new MockAuthProvider(users as any, new IdentityService(users as any, couriers as any), jwt as any, audit as any);
     return { provider, users, couriers, jwt, audit };
 }
 

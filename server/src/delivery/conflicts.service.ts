@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 
@@ -93,6 +93,8 @@ export class ConflictsService {
         const stored = await em.findOne(DeliveryConflict, { where: { user_id: user.id, operation_id: operationId } });
         if (stored) return this.replay(stored, task.id, hash);
 
+        //the row of the moment, under the lock, like the attempts route: evidence is recorded for a row the account holds
+        if (locked && locked.courier_id !== (await this.identity.resolve(user))) throw new ForbiddenException('this account no longer holds the courier row of this task');
         const code = rejectionOf(locked, issuance, submittedRevision);
         if (!code) throw conflict('the report could still be applied, it is not a conflict. send it as a delivery report', ReportConflictCode.not_a_conflict);
 

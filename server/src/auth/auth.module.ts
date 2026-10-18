@@ -10,6 +10,7 @@ import { AuthGuard } from './auth.guard';
 import { AUTH_PROVIDER } from './auth.provider';
 import { MOCK_TOKEN_ISSUER, MockAuthProvider } from './mock/mock-auth.provider';
 import { CognitoAuthProvider } from './cognito/cognito-auth.provider';
+import { IdentityService } from './identity.service';
 import { authMode, jwtSecret } from '../env';
 
 @Module({
@@ -29,6 +30,7 @@ import { authMode, jwtSecret } from '../env';
   ],
   controllers: [AuthController],
   providers: [
+    IdentityService,
     MockAuthProvider,
     CognitoAuthProvider,
     //both providers exist, the mode picks which one the guard talks to. picked once at boot like the storage backend

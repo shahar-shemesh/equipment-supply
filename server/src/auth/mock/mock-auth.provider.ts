@@ -4,10 +4,10 @@ import { JwtService } from '@nestjs/jwt';
 import { Repository } from 'typeorm';
 
 import { AuditAction, AuditEntityType, AuthMode, IAuthUser, MockIdentity, UserRole } from '../../../../shared/@core';
-import { rolesOf } from '../../../../shared/auth';
-import { User, Courier } from '../../entities';
+import { User } from '../../entities';
 import { AuditService } from '../../audit/audit.service';
 import { AuthProvider } from '../auth.provider';
+import { IdentityService } from '../identity.service';
 import { mockIdentity } from './mock-identities';
 import { mockAuthAllowed } from '../../env';
 
@@ -27,7 +27,7 @@ export class MockAuthProvider implements AuthProvider {
 
   constructor(
     @InjectRepository(User) private users: Repository<User>,
-    @InjectRepository(Courier) private couriers: Repository<Courier>,
+    private identity: IdentityService,
     private jwt: JwtService,
     private audit: AuditService,
   ) {}
@@ -54,20 +54,11 @@ export class MockAuthProvider implements AuthProvider {
   /*──────────────────────────────────────────────────────────────────────────*/
 
   //signs the token for a users row. shared with the e2e helper (e2e/auth-helper.ts), whose fixtures insert their own
-  //users and have no identity key to offer. the courier row is looked up for every role: a manager's courier view
-  //needs it too. the auth_login audit row is written here so a token issued either way is on record; detached, a
-  //login writes nothing else
+  //users and have no identity key to offer. the identity (roles, courier row) is the one identity.service answers to
+  ///me as well, so the login and a later refresh say the same thing. the auth_login audit row is written here so a
+  //token issued either way is on record; detached, a login writes nothing else
   async issueFor(user: User): Promise<{ token: string; user: IAuthUser }> {
-    //the same lookup as delivery/courier-identity.service.ts, so the hint and the request's answer name the same row
-    const courier = await this.couriers.findOne({ where: { user_id: user.id }, order: { active: 'DESC', id: 'DESC' } });
-    const authUser: IAuthUser = {
-      id: user.id,
-      username: user.username,
-      name: user.display_name,
-      email: user.email ?? null,
-      roles: rolesOf(user.role),
-      courier_id: courier?.id ?? null,
-    };
+    const authUser = await this.identity.of(user);
     //a users.role outside the enum derives no role at all; a token with an empty list would pass only /auth/me and send
     //the client in circles between its two homes, so no token
     if (!authUser.roles.length) throw new ForbiddenException(`account ${user.username} has no role`);

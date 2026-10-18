@@ -13,14 +13,18 @@ import { requestPersistentStorage } from "./offline/storage";
 import { clearSyncedData, countReports, refresh, refreshIfStale } from "./offline/store";
 import { flushForLogout, getSyncStatus, startSync, stopSync } from "./offline/sync";
 import { SyncStatusBar } from "./components/SyncStatusBar";
+import { useOtherAccountsWork, useSyncStatus } from "./offline/useCourierData";
 
 //tablet / phone shell for the courier: slim gradient header, the sync strip, content, and the fixed "לוח משלוחים" bar
 //at the bottom. the offline worker lives as long as this layout is mounted for one account
 export default function CourierLayout() {
   const { t } = useTranslation();
-  const { user, logout } = useAuth();
+  const { user, logout, refreshIdentity } = useAuth();
   const navigate = useNavigate();
   const scope = scopeOf(user);
+  const { data: status } = useSyncStatus();
+  //without a scope: the reports of the row this account held before (or of another account) still on the device
+  const { data: pendingWork } = useOtherAccountsWork(scope);
   //the confirm dialog: how many reports stay on the device, how many went out just now, whether a pass ran and fell short
   const [confirm, setConfirm] = useState<{ count: number; sent: number; incomplete: boolean } | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -55,6 +59,23 @@ export default function CourierLayout() {
       document.removeEventListener("visibilitychange", visible);
     };
   }, [scope]);
+
+  //a request said the account holds no courier row any more: the worker idles (sync.ts) and the identity is asked for
+  //again. a new row restarts the worker under its scope through the effect above; no row unmounts the board into the
+  //notice below, with the queue of the old scope untouched. the same row back from the server means the two disagree
+  //for the moment (a re-link, a stale read): one restart, not twice within a minute, so a server that keeps refusing is
+  //not hammered; a failed request (offline) leaves the worker idle until the next answer
+  const lastRestart = useRef(0);
+  useEffect(() => {
+    if (!status.identity_lost || !scope) return;
+    refreshIdentity()
+      .then((u) => {
+        if (scopeOf(u) !== scope || Date.now() - lastRestart.current < 60_000) return;
+        lastRestart.current = Date.now();
+        startSync(scope, { afterSynced: (s) => refresh(s) }).catch(() => {});
+      })
+      .catch(() => {});
+  }, [status.identity_lost]);
 
   //reports that did not reach the server stay on the device under this account, so before leaving, what can go out now
   //goes out: one bounded pass when the device is online under a fresh token, behind a dialog the courier may cancel
@@ -119,9 +140,16 @@ export default function CourierLayout() {
         {scope ? (
           <Outlet />
         ) : (
-          <Alert severity="info" className="courier-no-identity">
-            {t("courier_no_identity")} {hasRole(user, UserRole.manager) ? t("courier_no_identity_manager") : t("courier_no_identity_courier")}
-          </Alert>
+          <div className="courier-no-identity">
+            <Alert severity="info">
+              {t("courier_no_identity")} {hasRole(user, UserRole.manager) ? t("courier_no_identity_manager") : t("courier_no_identity_courier")}
+            </Alert>
+            {/* what was signed under a row this account no longer holds stays on the device: said here, like on the
+                login page, until a policy for it exists (docs/auth.md) */}
+            {pendingWork.map((w) => (
+              <Alert key={w.scope} severity="warning">{t(w.count === 1 ? "sync_other_account_one" : "sync_other_account", { count: w.count, name: w.display_name || w.username })}</Alert>
+            ))}
+          </div>
         )}
       </main>
 

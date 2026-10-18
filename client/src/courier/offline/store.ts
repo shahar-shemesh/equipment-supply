@@ -233,6 +233,15 @@ async function doRefresh(scope: string, fetchAll: () => Promise<any>): Promise<R
   }
 
   const rows: IDeliveryTask[] = res.rows;
+  //the list is the account's, the scope is a row: when the account's row moved on the server (a re-link while the app
+  //was open) the list belongs to another scope and must not land under this one. the identity verdict moves the scope
+  //(sync.ts identity_lost, utils/auth.tsx refreshIdentity); a self pickup task carries no courier_id and is not a sign
+  const courierId = Number(scope.split(":")[1]);
+  if (rows.some((r) => r.courier_id != null && r.courier_id !== courierId)) {
+    noteBackgroundResult("identity");
+    await writeLastError(scope, "scope_mismatch").catch(() => {});
+    return { ok: false, error: "scope_mismatch" };
+  }
   const ids = new Set(rows.map((r) => r.id));
   const nowMs = Date.now();
   const now = new Date(nowMs).toISOString();

@@ -5,7 +5,16 @@ import { AttemptOutcome, ConflictReviewStatus, EvidenceUploadState, ReportConfli
 import { OTHER_SCOPE, PNG, SCOPE, courierUser, deferred, fullForm, makeTask, otherUser, setToken, snapshot, tick } from "../../test/fixtures";
 import { DB_NAME, closeDb, openCourierDb } from "./db";
 import { cacheTaskDetail, closeChannel, evidenceOf, getReport, listReports, otherScopesWithPendingWork, readBoard, readTask, refresh, retryEvidence, retryReport, submitReport, updateReportSync } from "./store";
-import { SyncStatus, Transport, flushForLogout, getSyncStatus, kickSync, resetSyncForTests, startSync, stopSync, subscribeSync } from "./sync";
+import { SyncStatus, Transport, flushForLogout, getSyncStatus, kickSync, offlineGet, resetSyncForTests, startSync, stopSync, subscribeSync } from "./sync";
+
+//the worker's own axios instance, for the one test that lets a background read reach it; every other test injects a
+//transport and never touches it
+const axiosMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
+vi.mock("axios", async (importOriginal) => {
+  const actual: any = await importOriginal();
+  const noop = { use: () => 0 };
+  return { ...actual, default: { ...actual.default, create: () => ({ get: axiosMocks.get, post: axiosMocks.post, interceptors: { request: noop, response: noop } }) } };
+});
 
 //the worker against a fake transport: what goes out, how every answer is classified, what a reconnect, a re-login, a
 //logout and another account's login do
@@ -325,6 +334,46 @@ describe("sync worker", () => {
     expect(getSyncStatus()).toMatchObject({ pending: 0, attention: 4 });
   });
 
+  it("a 403 courier_unlinked is a verdict on the identity, not on the report: the row goes back to queued, the pass stops, the worker idles until a new start", async () => {
+    const { reports } = await seed([1, 2]);
+    const unlinked = { status: 403, data: { statusCode: 403, message: "this account is not linked to a courier", code: "courier_unlinked" } };
+    const { post, transport } = fakeTransport([unlinked]);
+    const seen: SyncStatus[] = [];
+    const off = subscribeSync((s) => seen.push(s));
+    await startSync(SCOPE, { transport, now, random: () => 0 });
+    off();
+    expect(post).toHaveBeenCalledTimes(1);
+    const rows = await Promise.all(reports.map((r) => getReport(SCOPE, r.operation_id)));
+    expect(rows.map((r) => r.sync.state)).toEqual([ReportSyncState.queued, ReportSyncState.queued]);
+    expect(rows[0].sync).toMatchObject({ http_status: 403, last_error: "this account is not linked to a courier", next_at: null });
+    expect(getSyncStatus()).toMatchObject({ identity_lost: true, pending: 2, attention: 0, auth_required: false });
+    expect(seen.some((s) => s.identity_lost)).toBe(true);
+    //every trigger is ignored while the identity is lost: nothing goes out, nothing changes on the device
+    await kickSync("retry");
+    await kickSync("online");
+    expect(post).toHaveBeenCalledTimes(1);
+    expect((await listReports(SCOPE)).map((r) => r.sync.state)).toEqual([ReportSyncState.queued, ReportSyncState.queued]);
+    //a start (the row came back, or the layout restarted the worker) sends both with the same operation ids
+    await startSync(SCOPE, { transport, now, random: () => 0 });
+    expect(post).toHaveBeenCalledTimes(3);
+    expect(post.mock.calls.map((c) => c[1].operation_id)).toEqual([reports[0].operation_id, reports[0].operation_id, reports[1].operation_id]);
+    expect(getSyncStatus()).toMatchObject({ identity_lost: false, pending: 0 });
+  });
+
+  it("a background read answered 403 courier_unlinked raises the identity verdict, any other 403 does not", async () => {
+    //offlineGet judges the token by the real clock, not by the injected now of the worker tests
+    setToken({ sub: 7, exp: Math.floor(Date.now() / 1000) + 3600 });
+    axiosMocks.get.mockRejectedValueOnce({ response: { status: 403, data: { statusCode: 403, message: "this account is not linked to a courier", code: "courier_unlinked" } } });
+    await expect(offlineGet("/delivery/tasks", { tab: "all" })).rejects.toBeTruthy();
+    expect(axiosMocks.get).toHaveBeenCalledTimes(1);
+    expect(getSyncStatus()).toMatchObject({ identity_lost: true, reachable: true, auth_required: false });
+
+    resetSyncForTests();
+    axiosMocks.get.mockRejectedValueOnce({ response: { status: 403, data: { statusCode: 403, message: "wrong role for this route" } } });
+    await expect(offlineGet("/delivery/tasks", { tab: "all" })).rejects.toBeTruthy();
+    expect(getSyncStatus()).toMatchObject({ identity_lost: false, reachable: true });
+  });
+
   it("a 2xx with an unreadable body is retried, not marked synced", async () => {
     const { reports } = await seed([1]);
     const { post, transport } = fakeTransport([{ status: 200, data: "<html>captive portal</html>" }]);
@@ -457,6 +506,23 @@ describe("evidence of rejected reports", () => {
     expect(r.sync.state).toBe(ReportSyncState.conflict);
     expect(getSyncStatus()).toMatchObject({ pending: 0, attention: 0 });
     expect(post).toHaveBeenCalledTimes(3);
+  });
+
+  it("an evidence upload answered 403 courier_unlinked stays pending, the pass stops and the worker idles", async () => {
+    const { reports } = await seed([1]);
+    const rejected = { status: 409, data: { statusCode: 409, message: "task is no longer open", code: ReportConflictCode.task_cancelled } };
+    const unlinked = { status: 403, data: { statusCode: 403, message: "this account is not linked to a courier", code: "courier_unlinked" } };
+    const { post, transport } = fakeTransport([rejected, unlinked]);
+    await startSync(SCOPE, { transport, now, random: () => 0 });
+    //the report's 409, then its evidence refused by the identity verdict
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(post.mock.calls[1][0]).toBe(`/delivery/tasks/1/conflicts`);
+    const row = await getReport(SCOPE, reports[0].operation_id);
+    expect(row.sync.state).toBe(ReportSyncState.conflict);
+    expect(evidenceOf(row).state).toBe(EvidenceUploadState.pending);
+    expect(getSyncStatus()).toMatchObject({ identity_lost: true });
+    await kickSync("retry");
+    expect(post).toHaveBeenCalledTimes(2);
   });
 
   it("a conflict stored before the evidence field existed is uploaded on the next start", async () => {

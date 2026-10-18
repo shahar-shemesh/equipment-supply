@@ -71,6 +71,11 @@ export enum ReportConflictCode {
   not_a_conflict = "not_a_conflict", //only from POST .../conflicts: the report could still be applied, so nothing is recorded as evidence
 }
 
+// the code on the 403 of every courier operation of an account that holds no courier row (server/src/delivery/
+// courier-identity.service.ts). the tablet stops its worker on it and keeps its queue as it is until the identity is
+// refreshed (client/src/courier/offline/sync.ts)
+export const COURIER_UNLINKED_CODE = "courier_unlinked";
+
 // where the evidence of a rejected report stands: on the device only, on its way, kept on the server for the manager,
 // or looked at by the manager. never a delivery state: a reviewed report was still not applied
 export enum ConflictReviewStatus {

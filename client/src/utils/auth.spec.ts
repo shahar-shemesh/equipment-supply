@@ -21,13 +21,14 @@ const managerUser: IAuthUser = { id: 1, username: "manager", name: "דנה לו�
 
 let root: Root;
 let host: HTMLDivElement;
-const probe: { signIn: AuthApi["signIn"] | null; logout: AuthApi["logout"] | null } = { signIn: null, logout: null };
+const probe: { signIn: AuthApi["signIn"] | null; logout: AuthApi["logout"] | null; refreshIdentity: AuthApi["refreshIdentity"] | null } = { signIn: null, logout: null, refreshIdentity: null };
 type AuthApi = ReturnType<typeof useAuth>;
 
 function Probe() {
-  const { user, mode, modeError, signIn, logout } = useAuth();
+  const { user, mode, modeError, signIn, logout, refreshIdentity } = useAuth();
   probe.signIn = signIn;
   probe.logout = logout;
+  probe.refreshIdentity = refreshIdentity;
   return createElement("span", null, createElement("span", { id: "user" }, user ? String(user.id) : "none"), createElement("span", { id: "mode" }, mode ?? (modeError ? "error" : "loading")));
 }
 
@@ -218,6 +219,77 @@ describe("AuthProvider and the session", () => {
     });
     expect(shown()).toBe("none");
     expect(localStorage.getItem(USER_KEY)).toBe(old);
+  });
+
+  it("the identity follows /auth/me: a courier row linked or unlinked since the login replaces the stored user, a failed request or another account's answer keeps it", async () => {
+    localStorage.setItem(USER_KEY, JSON.stringify(courierUser));
+    setToken({ sub: 7, exp: Math.floor(T / 1000) + 3600 });
+    //asked at mount, with the row the manager linked meanwhile
+    mocks.get.mockReset().mockImplementation(async (path: string) => (path === "/auth/mode" ? { mode: "mock" } : { ...courierUser, courier_id: 9 }));
+    await render();
+    expect(mocks.get).toHaveBeenCalledWith("/auth/me");
+    expect(JSON.parse(localStorage.getItem(USER_KEY)).courier_id).toBe(9);
+    expect(shown()).toBe("7");
+
+    //a failed request rejects and keeps the snapshot
+    mocks.get.mockReset().mockRejectedValue(new Error("offline"));
+    await act(async () => {
+      await expect(probe.refreshIdentity()).rejects.toThrow("offline");
+    });
+    expect(JSON.parse(localStorage.getItem(USER_KEY)).courier_id).toBe(9);
+
+    //the row was unlinked
+    mocks.get.mockReset().mockResolvedValue({ ...courierUser, courier_id: null });
+    await act(async () => {
+      await probe.refreshIdentity();
+    });
+    expect(JSON.parse(localStorage.getItem(USER_KEY)).courier_id).toBeNull();
+
+    //an answer for another account, or one that is not a session, changes nothing
+    mocks.get.mockReset().mockResolvedValueOnce({ ...courierUser, id: 8, courier_id: 4 }).mockResolvedValueOnce({ mode: "mock" });
+    await act(async () => {
+      await probe.refreshIdentity();
+      await probe.refreshIdentity();
+    });
+    expect(JSON.parse(localStorage.getItem(USER_KEY))).toMatchObject({ id: 7, courier_id: null });
+    expect(localStorage.getItem(TOKEN_KEY)).toBeTruthy();
+
+    //the network comes back: asked again without anyone pressing anything (the tablet that opened offline)
+    mocks.get.mockReset().mockResolvedValue({ ...courierUser, courier_id: 11 });
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+    });
+    expect(mocks.get).toHaveBeenCalledWith("/auth/me");
+    expect(JSON.parse(localStorage.getItem(USER_KEY)).courier_id).toBe(11);
+  });
+
+  it("an answer that lands after a logout, or after another account signed in, is not written", async () => {
+    localStorage.setItem(USER_KEY, JSON.stringify(courierUser));
+    setToken({ sub: 7, exp: Math.floor(T / 1000) + 3600 });
+    let answer: (v: any) => void = () => {};
+    mocks.get.mockReset().mockImplementation((path: string) => (path === "/auth/mode" ? Promise.resolve({ mode: "mock" }) : new Promise((res) => (answer = res))));
+    await render();
+    expect(shown()).toBe("7");
+
+    //the mount's request is still out when the courier signs out
+    await act(async () => probe.logout());
+    expect(localStorage.getItem(USER_KEY)).toBeNull();
+    await act(async () => {
+      answer({ ...courierUser, courier_id: 9 });
+    });
+    expect(localStorage.getItem(USER_KEY)).toBeNull();
+    expect(shown()).toBe("none");
+
+    //and with another account signed in meanwhile, the late answer of the first one changes nothing
+    localStorage.setItem(USER_KEY, JSON.stringify(courierUser));
+    setToken({ sub: 7, exp: Math.floor(T / 1000) + 3600 });
+    const pending = probe.refreshIdentity();
+    localStorage.setItem(USER_KEY, JSON.stringify(managerUser));
+    await act(async () => {
+      answer({ ...courierUser, courier_id: 9 });
+      await pending;
+    });
+    expect(JSON.parse(localStorage.getItem(USER_KEY))).toEqual(managerUser);
   });
 
   it("a session stored before the roles existed reads as no user and is dropped with its token", async () => {

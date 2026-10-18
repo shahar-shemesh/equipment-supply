@@ -146,6 +146,9 @@ export class DeliveryService {
         if (!locked || locked.status !== TaskStatus.pending) {
           throw conflict('task is no longer open, it was reported or reassigned meanwhile', locked?.status === TaskStatus.cancelled ? ReportConflictCode.task_cancelled : ReportConflictCode.task_closed);
         }
+        //the row of the moment, under the lock. a reassignment cancels the task and is caught above; an account whose
+        //courier row was unlinked or moved since myTask resolved it must not sign for a task of a row it no longer holds
+        if (locked.courier_id !== (await this.identity.resolve(user))) throw new ForbiddenException('this account no longer holds the courier row of this task');
         if (issuance.status !== IssuanceStatus.assigned) throw conflict(`issuance is ${issuance.status}, a delivery report needs it assigned`, ReportConflictCode.issuance_not_assigned);
         //reached by a bump that left the task alone: a line the manager took off (issuances.service.removeItem), and
         //later item or customer changes from SAP. the stale report was let through the validator above for this, so it
