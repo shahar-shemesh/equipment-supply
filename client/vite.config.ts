@@ -48,7 +48,7 @@ export default defineConfig({
         //the manager board's chunk (the data grid) and the grid's excel export chunk are not for the courier's offline
         //shell: a tablet would download 1.8 MB it never opens. the manager loads them from the network like any page
         globIgnores: ["**/IssuancesBoard-*.js", "**/exceljs*.js"],
-        //no runtimeCaching: the app has no cross origin asset. rubik comes from the bundle (main.tsx), and a worker
+        //no runtimeCaching: the app has no cross origin asset. rubik comes from the bundle (styles/_fonts.scss), and a worker
         //route for a cross origin url would fetch it under the csp of sw.js, which has no connect-src for it
         cleanupOutdatedCaches: true,
       },

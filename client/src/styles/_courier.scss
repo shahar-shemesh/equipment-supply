@@ -527,21 +527,20 @@
 // find dialog
 .find-dialog {
     &__camera {
+        position: relative; //the video fills it from outside the flow, see below
         overflow: hidden;
         background: var(--color-primary-light);
         border-radius: 12px;
         height: 200px;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 12px;
         margin-bottom: 12px;
-        color: var(--color-text-secondary);
-        font-size: 13px;
     }
 
+    //not a flex item on purpose: ios safari sizes a centered <video> from the stream's aspect ratio
+    //and ignores its percentage width, so the preview showed as a narrow strip
     &__camera video {
+        position: absolute;
+        inset: 0;
+        display: block;
         width: 100%;
         height: 100%;
         object-fit: contain; //show the same image the decoder sees

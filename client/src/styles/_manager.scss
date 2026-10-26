@@ -1242,7 +1242,10 @@
             display: none;
         }
 
-        tr {
+        // tbody tr, not tr: the touch block above sets the 48px row height on .issuances-table tbody tr, and a card
+        // needs the same specificity to win it (this block comes later in the file). with a fixed height the cells
+        // spilled into the next card on a phone
+        tbody tr {
             display: flex;
             flex-wrap: wrap;
             align-items: center;
@@ -1251,7 +1254,6 @@
             border-radius: 12px;
             padding: 4px 12px 8px;
             margin-bottom: 12px;
-            // the touch block above gives real table rows a 48px height, a card grows with its cells
             height: auto;
 
             &.is-selected {

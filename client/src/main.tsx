@@ -12,17 +12,6 @@ import { AppRouter } from "./routers/AppRouter";
 import { registerServiceWorker } from "./courier/offline/sw";
 
 import "./styles/index.scss";
-//Rubik is bundled, not fetched from google fonts: the service worker used to intercept that stylesheet and its own
-//fetch of it is blocked by the csp on sw.js (connect-src). hebrew and latin only, the four weights the theme uses;
-//the woff2 files land in /assets and are precached with the rest of the shell
-import "@fontsource/rubik/hebrew-400.css";
-import "@fontsource/rubik/hebrew-500.css";
-import "@fontsource/rubik/hebrew-600.css";
-import "@fontsource/rubik/hebrew-700.css";
-import "@fontsource/rubik/latin-400.css";
-import "@fontsource/rubik/latin-500.css";
-import "@fontsource/rubik/latin-600.css";
-import "@fontsource/rubik/latin-700.css";
 
 i18n.use(initReactI18next).init(Translation as any);
 
