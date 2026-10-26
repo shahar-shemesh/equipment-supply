@@ -9,7 +9,8 @@ import { DeliveryOperation } from './delivery-operation.entity';
 import { DeliveryConflict } from './delivery-conflict.entity';
 import { AuditLog } from './audit-log.entity';
 import { XmlOutbox } from './xml-outbox.entity';
+import { XmlImportFile } from './xml-import-file.entity';
 
-export { User, Courier, Issuance, IssuanceItem, DeliveryTask, DeliveryAttempt, DeliveryAttemptItem, DeliveryOperation, DeliveryConflict, AuditLog, XmlOutbox };
+export { User, Courier, Issuance, IssuanceItem, DeliveryTask, DeliveryAttempt, DeliveryAttemptItem, DeliveryOperation, DeliveryConflict, AuditLog, XmlOutbox, XmlImportFile };
 
-export const entities = [User, Courier, Issuance, IssuanceItem, DeliveryTask, DeliveryAttempt, DeliveryAttemptItem, DeliveryOperation, DeliveryConflict, AuditLog, XmlOutbox];
+export const entities = [User, Courier, Issuance, IssuanceItem, DeliveryTask, DeliveryAttempt, DeliveryAttemptItem, DeliveryOperation, DeliveryConflict, AuditLog, XmlOutbox, XmlImportFile];

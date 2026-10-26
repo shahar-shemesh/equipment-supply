@@ -147,6 +147,8 @@ vite.config.ts.timestamp-*
 design/
 # xml export with XML_EXPORT_STORAGE=local (docs/xml-export.md)
 server/exports/
+# the directories of the issuance xml import (etls/issuance-xml-import/README.md)
+etls/issuance-xml-import/data/
 # Claude Code: per-machine files
 .claude/settings.local.json
 .claude/handoff.md

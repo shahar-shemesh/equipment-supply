@@ -55,7 +55,7 @@ const OP_A = 'a0d17000-0000-4000-8000-000000000001';
 //one manager, one courier with a login, one courier without, one issuance with two lines assigned to the first courier.
 //the two logins at the end are the first two rows of every test
 async function fixture(): Promise<Fixture> {
-    await ds.query('TRUNCATE TABLE xml_outbox, audit_log, delivery_conflicts, delivery_operations, delivery_attempt_items, delivery_attempts, delivery_tasks, issuance_items, issuances, couriers, users RESTART IDENTITY CASCADE');
+    await ds.query('TRUNCATE TABLE xml_import_files, xml_outbox, audit_log, delivery_conflicts, delivery_operations, delivery_attempt_items, delivery_attempts, delivery_tasks, issuance_items, issuances, couriers, users RESTART IDENTITY CASCADE');
 
     const manager = await ds.getRepository(User).save({ username: 'm', display_name: 'דנה', role: UserRole.manager });
     const courierUser = await ds.getRepository(User).save({ username: 'c', display_name: 'courier', role: UserRole.courier });
@@ -406,6 +406,9 @@ describe('login and reading the log', () => {
 
 describe('seed', () => {
     it('the seed ends with one system row that counts what it inserted, and it reads back through the api', async () => {
+        //the import etl's tracking table is the seed's to wipe too: a row left behind would make a re-dropped document
+        //read as imported already (etls/issuance-xml-import)
+        await ds.query(`INSERT INTO xml_import_files (content_sha256, file_name, size_bytes, status) VALUES ('${'a'.repeat(64)}', 'left-behind.xml', 1, 'completed')`);
         const previous = process.env.ALLOW_DESTRUCTIVE_SEED;
         process.env.ALLOW_DESTRUCTIVE_SEED = 'true';
         try {
@@ -414,6 +417,7 @@ describe('seed', () => {
             if (previous === undefined) delete process.env.ALLOW_DESTRUCTIVE_SEED;
             else process.env.ALLOW_DESTRUCTIVE_SEED = previous;
         }
+        expect(+(await ds.query('SELECT count(*)::int AS n FROM xml_import_files'))[0].n).toBe(0);
         const rows = await ds.getRepository(AuditLog).find({ order: { id: 'DESC' } });
         expect(rows).toHaveLength(1);
         expect(rows[0]).toMatchObject({ actor_type: AuditActorType.system, actor_user_id: null, actor_username: null, actor_role: null, action: AuditAction.system_seed, entity_type: AuditEntityType.system, entity_id: null, issuance_id: null, batch_id: null, details: { users: seedUsers.length, couriers: seedCouriers.length, issuances: 30 } });

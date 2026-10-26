@@ -368,6 +368,7 @@ export enum AuditAction {
   auth_login_failed = "auth.login_failed", //the one rejected request that is recorded
   system_seed = "system.seed",
   xml_export_retry = "xml_export.retry", //a manager sent a failed xml export back to the queue
+  issuance_import = "issuance.import", //a SAP document inserted or updated the issuance (etls/issuance-xml-import), actor_type system
 }
 
 // one row of audit_log. the actor is copied at write time (no foreign key to users), so the row reads the same after a
@@ -405,6 +406,11 @@ export enum XmlOutboxStatus {
   completed = "completed", //the object is in the bucket
   failed = "failed", //out of attempts, or a permanent error (the document could not be built, another object under the key); a manager retries it
 }
+
+// the import etl's tracking rows (xml_import_files, etls/issuance-xml-import): the claim status and the kind of a failure.
+// the server only owns the table (entity and migration); the values are spelled here so both sides read the same ones
+export type XmlImportFileStatus = "processing" | "completed" | "failed"; //processing: claimed until lease_until; completed: committed, the bytes never import again; failed: rolled back
+export type XmlImportErrorKind = "permanent" | "retryable"; //permanent: the file went to the error directory; retryable: it stayed and is claimed again after its backoff
 
 // one row of xml_outbox as GET /api/xml-export shows it: the columns of the table, the payload itself stays inside
 export interface IXmlExportEvent {

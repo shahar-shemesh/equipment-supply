@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE IssuanceImport [<!ENTITY x "xxxxxxxxxx">]>
+<IssuanceImport xmlns="urn:equipment-supply:issuance-import" schemaVersion="0.1-provisional">
+  <DocumentId>SAP-DLV-2026-000126</DocumentId>
+  <GeneratedAt>2026-10-25T09:33:00Z</GeneratedAt>
+  <Issuances>
+    <Issuance>
+      <SapNumber>2000703</SapNumber>
+      <Customer><Name>&x;</Name></Customer>
+      <Address><Street>רחוב</Street><City>עיר</City></Address>
+      <Items><Item><LineNo>1</LineNo><ProductName>מוצר</ProductName></Item></Items>
+    </Issuance>
+  </Issuances>
+</IssuanceImport>

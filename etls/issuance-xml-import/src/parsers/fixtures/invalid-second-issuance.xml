@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<IssuanceImport xmlns="urn:equipment-supply:issuance-import" schemaVersion="0.1-provisional">
+  <DocumentId>SAP-DLV-2026-000124</DocumentId>
+  <GeneratedAt>2026-10-25T09:31:00+03:00</GeneratedAt>
+  <Issuances>
+    <Issuance>
+      <SapNumber>2000700</SapNumber>
+      <Customer><Name>ראשון תקין</Name></Customer>
+      <Address><Street>רחוב 1</Street><City>עיר</City></Address>
+      <Items><Item><LineNo>1</LineNo><ProductName>מוצר</ProductName></Item></Items>
+    </Issuance>
+    <Issuance>
+      <SapNumber>2000701</SapNumber>
+      <Priority>high</Priority>
+      <Customer><Name>שני פסול</Name></Customer>
+      <Address><Street>רחוב 2</Street><City>עיר</City></Address>
+      <Items><Item><LineNo>1</LineNo><ProductName>מוצר</ProductName></Item></Items>
+    </Issuance>
+  </Issuances>
+</IssuanceImport>

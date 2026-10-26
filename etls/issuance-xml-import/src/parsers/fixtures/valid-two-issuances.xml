@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<IssuanceImport xmlns="urn:equipment-supply:issuance-import" schemaVersion="0.1-provisional">
+  <DocumentId>SAP-DLV-2026-000123</DocumentId>
+  <GeneratedAt>2026-10-25T09:30:00Z</GeneratedAt>
+  <Issuances>
+    <Issuance>
+      <SapNumber>2000592</SapNumber>
+      <NumberPrefix>ד'</NumberPrefix>
+      <Priority>normal</Priority>
+      <DeliveryDate>2026-10-30</DeliveryDate>
+      <Customer>
+        <Name>ישראל ישראלי</Name>
+        <IdNumber>012345678</IdNumber>
+        <Phone>050-1234567</Phone>
+      </Customer>
+      <Address>
+        <Street>הרצל 12</Street>
+        <Building>בניין B קומה 3</Building>
+        <City>תל אביב</City>
+      </Address>
+      <Notes>להתקשר לפני ההגעה &amp; לעלות עם המעלית</Notes>
+      <Items>
+        <Item>
+          <LineNo>1</LineNo>
+          <ProductName>מחשב IEXXX</ProductName>
+          <CatalogNumber>PKG-1102</CatalogNumber>
+          <StationNumber>1104</StationNumber>
+          <SerialNumber>SN1</SerialNumber>
+          <Quantity>1</Quantity>
+        </Item>
+        <Item>
+          <LineNo>2</LineNo>
+          <ProductName>מסך 24"</ProductName>
+          <CatalogNumber>PKG-2201</CatalogNumber>
+          <Quantity>2</Quantity>
+        </Item>
+      </Items>
+    </Issuance>
+    <Issuance>
+      <SapNumber>0002000593</SapNumber>
+      <Priority>urgent</Priority>
+      <Customer>
+        <Name>שרה כהן</Name>
+      </Customer>
+      <Address>
+        <Street>בן גוריון 5</Street>
+        <City>חיפה</City>
+      </Address>
+      <Notes><![CDATA[<דחוף> לפני 10:00]]></Notes>
+      <Items>
+        <Item>
+          <LineNo>1</LineNo>
+          <ProductName>מדפסת</ProductName>
+        </Item>
+      </Items>
+    </Issuance>
+  </Issuances>
+</IssuanceImport>

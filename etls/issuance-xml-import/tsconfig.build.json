@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "sourceMap": false, "experimentalDecorators": false, "emitDecoratorMetadata": false, "strictPropertyInitialization": true },
+  "include": ["src/**/*"],
+  "exclude": ["src/**/*.spec.ts", "src/e2e/**"]
+}

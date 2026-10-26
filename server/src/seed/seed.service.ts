@@ -24,7 +24,7 @@ export class SeedService {
   async run(opts: { bulk?: number } = {}) {
     if (!destructiveSeedAllowed()) throw new Error('refusing to seed: needs ENVIRONMENT=LOCAL and ALLOW_DESTRUCTIVE_SEED=true');
     this.logger.log('===== seeding, all existing rows are dropped =====');
-    await this.dataSource.query('TRUNCATE TABLE xml_outbox, audit_log, delivery_conflicts, delivery_operations, delivery_attempt_items, delivery_attempts, delivery_tasks, issuance_items, issuances, couriers, users RESTART IDENTITY CASCADE');
+    await this.dataSource.query('TRUNCATE TABLE xml_import_files, xml_outbox, audit_log, delivery_conflicts, delivery_operations, delivery_attempt_items, delivery_attempts, delivery_tasks, issuance_items, issuances, couriers, users RESTART IDENTITY CASCADE');
 
     const handcrafted = buildIssuances();
     const bulk = buildBulkIssuances(opts.bulk || 0);
