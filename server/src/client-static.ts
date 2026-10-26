@@ -11,10 +11,11 @@ const REVALIDATE = 'no-cache';
 
 //helmet's default headers (nosniff, frame-ancestors, hsts, a strict csp, no x-powered-by). first in the chain so the
 //cors preflight and the 404s carry the headers too. the api alone needs no exception: json only, no swagger.
-//with the client mounted the defaults still fit the built app: index.html has no inline script, the modules come from
-//the assets folder, Rubik is a stylesheet from fonts.googleapis.com and files from fonts.gstatic.com (the default
-//style-src and font-src allow https:). one exception, worker-src: qr-scanner's fallback decoder (browsers without
-//BarcodeDetector, the ipad's safari) starts its worker from a blob: url
+//with the client mounted the defaults still fit the built app: index.html has no inline script, the modules, the css
+//and the rubik font files all come from the assets folder, nothing is cross origin. that matters for the worker: a
+//fetch from inside sw.js runs under the csp of sw.js, which has no connect-src, so a cross origin asset the worker
+//intercepted would be refused (google fonts was, until the font was bundled). one exception, worker-src: qr-scanner's
+//fallback decoder (browsers without BarcodeDetector, the ipad's safari) starts its worker from a blob: url
 export function applyHttpDefaults(app: NestExpressApplication, dist: string | null) {
   app.use(helmet(dist ? { contentSecurityPolicy: { directives: { 'worker-src': ["'self'", 'blob:'] } } } : {}));
   //after helmet so the html carries the headers, before nest's router so a page url is not a 404

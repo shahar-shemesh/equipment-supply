@@ -12,7 +12,7 @@ const cacheRtl = createCache({ key: "muirtl", stylisPlugins: [prefixer, rtlPlugi
 //breakpoints stay at the mui defaults (sm 600, md 900, lg 1200), styles/_breakpoints.scss uses the same numbers
 const theme = createTheme({
   direction: "rtl",
-  typography: { fontFamily: "Rubik, Arial" },
+  typography: { fontFamily: "Rubik, Arial, sans-serif" },
   palette: {
     primary: { main: "#0A52BD", dark: "#084297", light: "#3B75CA" },
     text: { primary: "#1A2B3D", secondary: "#5C6B7A" },
