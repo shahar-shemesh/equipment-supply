@@ -10,6 +10,7 @@ export function QrCamera({ onScan }: { onScan: (text: string) => void }) {
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [debug, setDebug] = useState("");
   callback.current = onScan; //parent renders should not reopen the camera or keep an old lookup callback
 
   useEffect(() => {
@@ -32,6 +33,19 @@ export function QrCamera({ onScan }: { onScan: (text: string) => void }) {
     video.playsInline = true;
     video.setAttribute("aria-label", t("find_title"));
     container.current.appendChild(video);
+    //The box is sized by hand, not by object-fit: ios 26 webkit painted a 3:4 portrait stream contained in the 408x200
+    //box 29px wide instead of 150 (the horizontal scale applied twice). Same contain math, in pixels, so the frame
+    //fills its element and the browser has nothing to fit.
+    const fit = () => {
+      const box = container.current;
+      if (!box || !video.videoWidth || !video.videoHeight) return;
+      const scale = Math.min(box.clientWidth / video.videoWidth, box.clientHeight / video.videoHeight);
+      video.style.width = `${Math.round(video.videoWidth * scale)}px`;
+      video.style.height = `${Math.round(video.videoHeight * scale)}px`;
+    };
+    video.addEventListener("loadedmetadata", fit);
+    video.addEventListener("resize", fit); //a stream can change its frame size after it starts
+    window.addEventListener("resize", fit);
     const scanner = new QrScanner(video, (result) => {
       if (disposed || scanned) return;
       scanned = true; //lock before notifying React; another frame may already be waiting
@@ -59,6 +73,22 @@ export function QrCamera({ onScan }: { onScan: (text: string) => void }) {
       },
     });
 
+    //Temporary diagnostics for the iphone preview strip: ?camdebug in the url prints what safari reports for the stream.
+    //Numbers only, not a ui string, so no dictionary key.
+    const debugTimer = /camdebug/.test(window.location.search) ? window.setInterval(() => {
+      const track = (video.srcObject as MediaStream | null)?.getVideoTracks()[0];
+      const settings = track?.getSettings() ?? {};
+      const box = container.current?.getBoundingClientRect();
+      const rect = video.getBoundingClientRect();
+      setDebug([
+        `video ${video.videoWidth}x${video.videoHeight} ready ${video.readyState}`,
+        `track ${settings.width}x${settings.height} ar ${settings.aspectRatio ?? "-"} fm ${settings.facingMode ?? "-"}`,
+        `box ${Math.round(box?.width ?? 0)}x${Math.round(box?.height ?? 0)} el ${Math.round(rect.width)}x${Math.round(rect.height)}`,
+        `style ${video.getAttribute("style") ?? "-"}`,
+        navigator.userAgent,
+      ].join("\n"));
+    }, 1000) : 0;
+
     scanner.start().then(() => {
       //The library stops late streams when destroyed while permission was still pending.
       if (!disposed) setReady(true);
@@ -78,6 +108,8 @@ export function QrCamera({ onScan }: { onScan: (text: string) => void }) {
 
     return () => {
       disposed = true;
+      window.clearInterval(debugTimer);
+      window.removeEventListener("resize", fit);
       //Stop the tracks now; delayed library callbacks only retain this detached video.
       void scanner.pause(true);
       scanner.destroy(); //releases the stream, worker and visibility listeners
@@ -89,5 +121,6 @@ export function QrCamera({ onScan }: { onScan: (text: string) => void }) {
     <div className="find-dialog__camera" ref={container} />
     {error ? <Alert severity="warning">{t(error)}</Alert> : <p role="status">{t(ready ? "find_camera_hint" : "find_camera_starting")}</p>}
     <Button onClick={() => setAttempt((value) => value + 1)} fullWidth>{t("find_camera_restart")}</Button>
+    {debug && <pre dir="ltr" style={{ fontSize: 11, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{debug}</pre>}
   </>;
 }
