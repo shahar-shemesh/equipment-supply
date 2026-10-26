@@ -9,7 +9,7 @@ import { DeliveryModule } from './delivery/delivery.module';
 import { SeedModule } from './seed/seed.module';
 import { AuditModule } from './audit/audit.module';
 import { XmlExportModule } from './xml-export/xml-export.module';
-import { schemaSyncAllowed } from './env';
+import { dbSsl, schemaSyncAllowed } from './env';
 
 @Module({
   imports: [
@@ -22,6 +22,7 @@ import { schemaSyncAllowed } from './env';
         username: process.env.DB_USER || 'equipment',
         password: process.env.DB_PASSWORD || 'equipment',
         database: process.env.DB_NAME || 'equipment_supply',
+        ssl: dbSsl(), //DB_SSL=true for a hosted postgres (Neon), see env.ts
         entities,
         //synchronize rebuilds the tables from the entity classes on every start. good enough for the local foundation,
         //has to become migrations before there is a shared environment with data anyone cares about.

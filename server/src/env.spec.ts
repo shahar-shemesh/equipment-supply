@@ -1,8 +1,9 @@
+import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
 import { AuthMode } from '../../shared/@core';
-import { assertSafeConfig, authMode, cognitoConfig, isProduction, mockAuthAllowed, seedBulkCount, xmlExportConfig, xmlExportTarget } from './env';
+import { assertSafeConfig, authMode, clientDist, cognitoConfig, dbSsl, isProduction, mockAuthAllowed, seedBulkCount, xmlExportConfig, xmlExportTarget } from './env';
 
 //the one env reader with input of its own: SEED_BULK goes through it so a typo refuses instead of seeding a smaller set
 
@@ -134,10 +135,97 @@ describe('xmlExportConfig', () => {
 
 /*──────────────────────────────────────────────────────────────────────────*/
 
+//CLIENT_DIST turns the static serving of the built client on (main.ts, client-static.ts): unset is today's json only
+//server, a folder that is not a built client refuses at startup and names the variable
+describe('clientDist', () => {
+    const previous = process.env.CLIENT_DIST;
+    let tmp: string;
+
+    beforeEach(() => {
+        delete process.env.CLIENT_DIST;
+        tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'client-dist-'));
+    });
+
+    afterEach(() => {
+        fs.rmSync(tmp, { recursive: true, force: true });
+        if (previous === undefined) delete process.env.CLIENT_DIST;
+        else process.env.CLIENT_DIST = previous;
+    });
+
+    it('unset or blank is off', () => {
+        expect(clientDist()).toBeNull();
+        for (const blank of ['', '   ']) {
+            process.env.CLIENT_DIST = blank;
+            expect(clientDist()).toBeNull();
+        }
+    });
+
+    it('a folder with an index.html is taken as an absolute path, padded or relative to the working directory', () => {
+        fs.writeFileSync(path.join(tmp, 'index.html'), '<!doctype html>');
+        process.env.CLIENT_DIST = tmp;
+        expect(clientDist()).toBe(tmp);
+        process.env.CLIENT_DIST = ` ${tmp} `;
+        expect(clientDist()).toBe(tmp);
+        process.env.CLIENT_DIST = path.relative(process.cwd(), tmp);
+        expect(path.isAbsolute(clientDist())).toBe(true);
+        expect(clientDist()).toBe(tmp);
+    });
+
+    it('anything else refuses and names the variable: no index.html, no such folder, a file, an index.html that is a folder', () => {
+        process.env.CLIENT_DIST = tmp;
+        expect(() => clientDist()).toThrow('CLIENT_DIST');
+        process.env.CLIENT_DIST = path.join(tmp, 'nothing-here');
+        expect(() => clientDist()).toThrow('CLIENT_DIST');
+        fs.writeFileSync(path.join(tmp, 'a-file'), 'x');
+        process.env.CLIENT_DIST = path.join(tmp, 'a-file');
+        expect(() => clientDist()).toThrow('CLIENT_DIST');
+        fs.mkdirSync(path.join(tmp, 'index.html'));
+        process.env.CLIENT_DIST = tmp;
+        expect(() => clientDist()).toThrow('CLIENT_DIST');
+    });
+});
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//DB_SSL is the tls of both postgres connections: off unless it says true, and the certificate is checked whenever it is on
+describe('dbSsl', () => {
+    const previous = process.env.DB_SSL;
+
+    afterEach(() => {
+        if (previous === undefined) delete process.env.DB_SSL;
+        else process.env.DB_SSL = previous;
+    });
+
+    it('unset, blank or false is no tls', () => {
+        delete process.env.DB_SSL;
+        expect(dbSsl()).toBe(false);
+        for (const off of ['', '  ', 'false', ' false ']) {
+            process.env.DB_SSL = off;
+            expect(dbSsl()).toBe(false);
+        }
+    });
+
+    it('true is tls with the certificate verified', () => {
+        for (const on of ['true', ' true ']) {
+            process.env.DB_SSL = on;
+            expect(dbSsl()).toEqual({ rejectUnauthorized: true });
+        }
+    });
+
+    it('refuses anything else and names the variable, there is no way to switch the verification off', () => {
+        for (const bad of ['TRUE', 'False', '1', '0', 'yes', 'require', 'no-verify', 'rejectUnauthorized=false']) {
+            process.env.DB_SSL = bad;
+            expect(() => dbSsl()).toThrow('DB_SSL');
+        }
+    });
+});
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
 //the auth switches: the mode, the mock lock outside LOCAL, the three cognito variables, and assertSafeConfig as the
 //first lock at startup (main.ts calls it before anything listens)
 describe('authMode, mockAuthAllowed, cognitoConfig and assertSafeConfig', () => {
-    const NAMES = ['ENVIRONMENT', 'NODE_ENV', 'AUTH_MODE', 'ALLOW_MOCK_AUTH', 'COGNITO_REGION', 'COGNITO_USER_POOL_ID', 'COGNITO_CLIENT_ID', 'JWT_SECRET', 'DB_SYNCHRONIZE', 'XML_EXPORT_ENABLED', 'XML_EXPORT_STORAGE'];
+    const NAMES = ['ENVIRONMENT', 'NODE_ENV', 'AUTH_MODE', 'ALLOW_MOCK_AUTH', 'COGNITO_REGION', 'COGNITO_USER_POOL_ID', 'COGNITO_CLIENT_ID', 'JWT_SECRET', 'DB_SYNCHRONIZE', 'XML_EXPORT_ENABLED', 'XML_EXPORT_STORAGE', 'CLIENT_DIST', 'DB_SSL'];
     const saved = Object.fromEntries(NAMES.map((k) => [k, process.env[k]]));
     const logger = { log: jest.fn(), warn: jest.fn() };
 
@@ -264,5 +352,41 @@ describe('authMode, mockAuthAllowed, cognitoConfig and assertSafeConfig', () => 
         process.env.JWT_SECRET = 'a-real-secret';
         process.env.AUTH_MODE = 'dev-local';
         expect(() => assertSafeConfig(logger)).toThrow('AUTH_MODE');
+    });
+
+    it('assertSafeConfig: the shared test box (TEST, mock, ALLOW_MOCK_AUTH, DB_SSL, CLIENT_DIST) starts, and a bad CLIENT_DIST or DB_SSL stops it by name', () => {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'client-dist-'));
+        try {
+            process.env.ENVIRONMENT = 'TEST';
+            process.env.AUTH_MODE = 'mock';
+            process.env.ALLOW_MOCK_AUTH = 'true';
+            process.env.JWT_SECRET = 'a-real-secret';
+            process.env.DB_SSL = 'true';
+            fs.writeFileSync(path.join(tmp, 'index.html'), '<!doctype html>');
+            process.env.CLIENT_DIST = tmp;
+            expect(() => assertSafeConfig(logger)).not.toThrow();
+            expect(logger.log).toHaveBeenCalledWith(expect.stringContaining(`client: ${tmp}, db tls: on`));
+
+            //a folder that is not a built client, the server does not start
+            fs.rmSync(path.join(tmp, 'index.html'));
+            expect(() => assertSafeConfig(logger)).toThrow('CLIENT_DIST');
+            process.env.CLIENT_DIST = path.join(tmp, 'nothing-here');
+            expect(() => assertSafeConfig(logger)).toThrow('CLIENT_DIST');
+
+            //unset: api only, and a typo in DB_SSL is refused before anything connects
+            delete process.env.CLIENT_DIST;
+            process.env.DB_SSL = 'yes';
+            expect(() => assertSafeConfig(logger)).toThrow('DB_SSL');
+            delete process.env.DB_SSL;
+            logger.log.mockClear();
+            expect(() => assertSafeConfig(logger)).not.toThrow();
+            expect(logger.log).toHaveBeenCalledWith(expect.stringContaining('client: off (api only), db tls: off'));
+
+            //the box without ALLOW_MOCK_AUTH still stops on the existing mock auth error
+            delete process.env.ALLOW_MOCK_AUTH;
+            expect(() => assertSafeConfig(logger)).toThrow('ALLOW_MOCK_AUTH');
+        } finally {
+            fs.rmSync(tmp, { recursive: true, force: true });
+        }
     });
 });

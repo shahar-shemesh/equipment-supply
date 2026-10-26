@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as path from 'path';
 
 import { AuthMode } from '../../shared/@core';
@@ -165,6 +166,40 @@ function wholeNumber(name: string, fallback: number, min: number) {
 
 /*──────────────────────────────────────────────────────────────────────────*/
 
+//CLIENT_DIST = the folder of the built client (client/dist). set: the server serves the app from it as well (main.ts,
+//client-static.ts), same origin, so the client's relative /api calls need no proxy. that is the one docker image. unset:
+//json only, as on a laptop where vite serves the client. a folder without an index.html throws at startup naming the
+//variable: a server that listens and answers 404 for the app's own page is harder to find than one that does not start.
+//relative paths resolve against the working directory, like XML_EXPORT_LOCAL_DIR
+export function clientDist() {
+  const raw = (process.env.CLIENT_DIST ?? '').trim();
+  if (raw === '') return null;
+  const dir = path.resolve(raw);
+  let built = false;
+  try {
+    built = fs.statSync(path.join(dir, 'index.html')).isFile();
+  } catch {
+    //no such folder or no such file, the throw below says it
+  }
+  if (!built) throw new Error(`CLIENT_DIST must be the folder of the built client (client/dist), there is no index.html in "${dir}"`);
+  return dir;
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//DB_SSL=true puts tls on both connections (the app's in app.module.ts, the migration cli's in data-source.ts): a hosted
+//postgres such as Neon refuses a plain one. unset, blank or false is no tls, as on a laptop and in docker compose. the
+//server's certificate is always verified and there is no switch for that: a server with a private ca needs its ca, not a
+//looser check. anything else throws, a typo must not quietly connect in the clear
+export function dbSsl() {
+  const raw = (process.env.DB_SSL ?? '').trim();
+  if (raw === '' || raw === 'false') return false;
+  if (raw === 'true') return { rejectUnauthorized: true };
+  throw new Error(`DB_SSL must be "true" or "false" (unset means false), got "${process.env.DB_SSL}"`);
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
 //called once from main.ts before anything listens. throws on the combinations that must never run, warns on the ones
 //that are allowed but worth noticing in the log
 export function assertSafeConfig(logger: { log: (m: string) => void; warn: (m: string) => void }) {
@@ -173,6 +208,8 @@ export function assertSafeConfig(logger: { log: (m: string) => void; warn: (m: s
   //the jwt module is registered in both modes (the mock provider signs with it), so the secret rule holds in both
   jwtSecret();
   const xml = xmlExportConfig(); //throws with the variable's name when the worker is on without a bucket or a region
+  const dist = clientDist(); //throws with the variable's name when the folder is not a built client
+  const ssl = dbSsl(); //throws with the variable's name on anything but true or false
 
   if (mode === AuthMode.mock && isProduction()) {
     throw new Error('AUTH_MODE=mock on production (NODE_ENV=production or ENVIRONMENT=PRODUCTION). ALLOW_MOCK_AUTH does not open it there; set AUTH_MODE=cognito');
@@ -188,7 +225,7 @@ export function assertSafeConfig(logger: { log: (m: string) => void; warn: (m: s
     logger.warn('DB_SYNCHRONIZE is ignored outside LOCAL, the schema needs migrations');
   }
 
-  logger.log(`environment: ${isLocal() ? 'LOCAL' : process.env.ENVIRONMENT || '(unset)'}, auth: ${mode}, schema sync: ${schemaSyncAllowed()}, seed allowed: ${destructiveSeedAllowed()}, xml export: ${xml.enabled ? xmlExportTarget(xml) : 'off'}`);
+  logger.log(`environment: ${isLocal() ? 'LOCAL' : process.env.ENVIRONMENT || '(unset)'}, auth: ${mode}, schema sync: ${schemaSyncAllowed()}, seed allowed: ${destructiveSeedAllowed()}, xml export: ${xml.enabled ? xmlExportTarget(xml) : 'off'}, client: ${dist ?? 'off (api only)'}, db tls: ${ssl ? 'on' : 'off'}`);
 }
 
 //"local <dir>" or "s3 <bucket>/<prefix>", for the startup lines of main.ts and of the worker

@@ -1,0 +1,16 @@
+# the build context is the repo root. what the image never needs, and what must never get in:
+# every .env (server/.env says ENVIRONMENT=LOCAL, client/.env holds a license key)
+**/.env
+**/.env.*
+
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+**/*.log
+server/exports
+
+.git
+.claude
+design
+docs
+etls

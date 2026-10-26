@@ -8,8 +8,9 @@ import { entities } from '../entities';
 import { AuthMockIdentities1791400000000 } from '../migrations/1791400000000-AuthMockIdentities';
 import { COURIERS_USER_UNIQUE, CourierUserUnique1791500000000 } from '../migrations/1791500000000-CourierUserUnique';
 
-//the migrations against a database of their own (docker compose up -d first). the base tables have no migration (the
-//first deployment ran synchronize, docs/domain.md), so the harness builds the current schema from the entities, puts
+//the migrations against a database of their own (docker compose up -d first). the harness builds the current schema
+//from the entities, the way synchronize built the first deployment (docs/domain.md), so the baseline migration finds
+//its base tables there and executes nothing; an empty database and the older shapes are baseline.e2e.spec's. it puts
 //the users table back in its previous shape with the last migration's down, inserts a row as an upgraded database
 //would hold one, and then runs the migrations the way migration:run does: the row must survive, the schema must match
 //the entities exactly (what synchronize would still change is the diff), every earlier migration must be a no-op on

@@ -24,6 +24,7 @@ Digital equipment issuance system for the Israeli Ministry of Defense: a warehou
 - The server e2e suite creates and truncates `equipment_supply_test`. Never point it at `equipment_supply`; re-seed the test database (`DB_NAME=equipment_supply_test npm run seed`) before manual checks against it.
 - `npm run seed` truncates every table and only runs with `ENVIRONMENT=LOCAL` and `ALLOW_DESTRUCTIVE_SEED=true`.
 - LOCAL rebuilds the schema with TypeORM `synchronize`; nothing else does. Every entity change also needs a migration in `server/src/migrations/`.
+- `server/src/migrations/1790000000000-Baseline.ts` builds an empty database and is frozen (`server/src/baseline-migration.spec.ts` pins its hash): never edit it, a schema change is always a new migration. No spec file inside `server/src/migrations/`, both migration globs would load it.
 - The production entry is `node dist/server/src/main.js`, not `dist/main.js`: nest-cli `sourceRoot` is `server/src` because `../shared` is compiled too.
 - The service worker exists only in the production build (`devOptions.enabled` is false in `client/vite.config.ts`). Test offline behaviour with `npm run build` and `npm run preview`, not the dev server.
 - The project runs on Node 20 (README).

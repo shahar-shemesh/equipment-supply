@@ -2,10 +2,10 @@ import { NestFactory } from '@nestjs/core';
 import { Logger } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import * as dotenv from 'dotenv';
-import helmet from 'helmet';
 
 import { AppModule } from './app.module';
-import { assertSafeConfig, authMode } from './env';
+import { applyHttpDefaults } from './client-static';
+import { assertSafeConfig, authMode, clientDist } from './env';
 
 dotenv.config({ path: '.env' });
 
@@ -15,10 +15,10 @@ async function bootstrap() {
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
-  //helmet's default headers (nosniff, frame-ancestors, hsts, a strict csp, no x-powered-by). the defaults need no
-  //exception here: this process answers json only, no swagger and no static files. first in the chain so the cors
-  //preflight and the 404s carry the headers too
-  app.use(helmet());
+  //helmet first in the chain, then the built client when CLIENT_DIST is set (the docker image), see client-static.ts
+  const dist = clientDist();
+  applyHttpDefaults(app, dist);
+  if (dist) logger.log(`serving the client from ${dist}`);
 
   //the signature arrives as a png data url inside the json body, express default of 100kb is not enough.
   //2mb covers the 1mb signature limit (SIGNATURE_MAX_BYTES) after base64 and leaves room for the rest of the report
