@@ -8,7 +8,7 @@ import { AuditService } from './audit.service';
 @Controller('/api/audit')
 @Roles(UserRole.manager)
 export class AuditController {
-  constructor(private readonly svc: AuditService) {}
+  constructor(private readonly svc: AuditService) { }
 
   @Get()
   list(@Query() q: any) {
