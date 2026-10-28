@@ -45,9 +45,11 @@ export default defineConfig({
         navigateFallback: "/index.html",
         navigateFallbackDenylist: [/^\/api\//],
         globPatterns: ["**/*.{js,css,html,svg,woff2}"],
-        //the manager board's chunk (the data grid) and the grid's excel export chunk are not for the courier's offline
-        //shell: a tablet would download 1.8 MB it never opens. the manager loads them from the network like any page
-        globIgnores: ["**/IssuancesBoard-*.js", "**/exceljs*.js"],
+        //the manager board's chunk (the data grid), the audit log's and the grid's excel export chunk are not for the
+        //courier's offline shell: a tablet would download 1.8 MB it never opens. the manager loads them from the network
+        //like any page. the grid and the date pickers are shared by the two pages, so rollup would put them in a chunk
+        //of their own under a name of its choosing: manualChunks below pins the names this list can ignore
+        globIgnores: ["**/IssuancesBoard-*.js", "**/AuditPage-*.js", "**/mui-x-*.js", "**/exceljs*.js"],
         //no runtimeCaching: the app has no cross origin asset. rubik comes from the bundle (styles/_fonts.scss), and a worker
         //route for a cross origin url would fetch it under the csp of sw.js, which has no connect-src for it
         cleanupOutdatedCaches: true,
@@ -65,4 +67,16 @@ export default defineConfig({
   preview: { https, proxy },
   //vite 5 still calls the legacy sass api by default and prints a deprecation warning on every start
   css: { preprocessorOptions: { scss: { api: "modern-compiler" } } },
+  build: {
+    rollupOptions: {
+      output: {
+        //the two mui x packages only the manager's lazy pages import, under a fixed name for the globIgnores above.
+        //not @mui/x-license: main.tsx imports it, grouping it here would drag the grid into the entry chunk
+        manualChunks(id) {
+          if (id.includes("@mui/x-data-grid")) return "mui-x-grid";
+          if (id.includes("@mui/x-date-pickers")) return "mui-x-pickers";
+        },
+      },
+    },
+  },
 });

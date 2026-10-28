@@ -11,6 +11,10 @@
             text-decoration: none;
             opacity: 0.85;
             white-space: nowrap;
+            // the audit link carries an icon before its text
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
 
             &.active {
                 opacity: 1;
@@ -71,6 +75,7 @@
             min-height: 48px;
             display: flex;
             align-items: center;
+            gap: 8px;
             font-size: 16px;
             // the active page gets the light blue strip, same idea as the bold link in the desktop header
             border-inline-start: 4px solid transparent;

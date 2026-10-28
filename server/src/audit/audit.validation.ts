@@ -2,14 +2,16 @@ import { BadRequestException } from '@nestjs/common';
 
 import { AuditAction } from '../../../shared/@core';
 
-//GET /api/audit?issuance_id=&actor_user_id=&action=&from=&to=&page=&size=. the query string is checked by hand like the
-//payloads (attempt.validation.ts): a value that is not what the parameter means is a 400 with the reason, never a silent
-//default, so a typo in a filter cannot read as an empty log
+//GET /api/audit?q=&issuance_id=&actor_user_id=&action=&from=&to=&order=&page=&size=. the query string is checked by hand
+//like the payloads (attempt.validation.ts): a value that is not what the parameter means is a 400 with the reason, never
+//a silent default, so a typo in a filter cannot read as an empty log
 
 export const SIZE_DEFAULT = 50;
 export const SIZE_MAX = 100;
+export const Q_MAX = 100; //the search box of the audit screen; a longer value is a paste, not a search
 
-export type AuditQuery = { issuance_id: number | null; actor_user_id: number | null; action: AuditAction | null; from: Date | null; to: Date | null; page: number; size: number };
+export type AuditOrder = 'asc' | 'desc';
+export type AuditQuery = { q: string | null; issuance_id: number | null; actor_user_id: number | null; actions: AuditAction[] | null; from: Date | null; to: Date | null; order: AuditOrder; page: number; size: number };
 
 const actions = new Set<string>(Object.values(AuditAction));
 
@@ -19,9 +21,6 @@ export function parseAuditQuery(q: any): AuditQuery {
   const size = int(q?.size, 'size') ?? SIZE_DEFAULT;
   if (size < 1 || size > SIZE_MAX) throw new BadRequestException(`size must be 1 to ${SIZE_MAX}`);
 
-  const action = q?.action == null || q?.action === '' ? null : q.action;
-  if (action != null && (typeof action !== 'string' || !actions.has(action))) throw new BadRequestException(`unknown action ${String(action)}`);
-
   const issuance_id = int(q?.issuance_id, 'issuance_id');
   const actor_user_id = int(q?.actor_user_id, 'actor_user_id');
   if (issuance_id === 0 || actor_user_id === 0) throw new BadRequestException('ids start at 1');
@@ -30,7 +29,42 @@ export function parseAuditQuery(q: any): AuditQuery {
   const to = date(q?.to, 'to', true);
   if (from && to && from >= to) throw new BadRequestException('from must be before to');
 
-  return { issuance_id, actor_user_id, action, from, to, page, size };
+  return { q: text(q?.q), issuance_id, actor_user_id, actions: actionList(q?.action), from, to, order: order(q?.order), page, size };
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//one action or a comma list of them (action=issuance.assign,issuance.edit), every member from the closed list. a repeated
+//parameter reaches here as an array and stays a 400: the comma is the list, the screen sends nothing else. duplicates
+//collapse, so "a,a" is one IN member
+function actionList(raw: any): AuditAction[] | null {
+  if (raw == null || raw === '') return null;
+  if (typeof raw !== 'string') throw new BadRequestException(`unknown action ${String(raw)}`);
+  const list = raw.split(',').map((s) => s.trim());
+  for (const a of list) if (!actions.has(a)) throw new BadRequestException(`unknown action ${a}`);
+  return Array.from(new Set(list)) as AuditAction[];
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//the free text search, trimmed. blank is no filter, over Q_MAX characters is a 400 (the ILIKE would still run, it would
+//just never match, which reads as an empty log for no visible reason)
+function text(raw: any): string | null {
+  if (raw == null) return null;
+  if (typeof raw !== 'string') throw new BadRequestException('q must be text');
+  const value = raw.trim();
+  if (!value) return null;
+  if (value.length > Q_MAX) throw new BadRequestException(`q is at most ${Q_MAX} characters`);
+  return value;
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//the sort direction of the timeline, the one sort the log has. absent is newest first
+function order(raw: any): AuditOrder {
+  if (raw == null || raw === '') return 'desc';
+  if (raw !== 'asc' && raw !== 'desc') throw new BadRequestException('order must be asc or desc');
+  return raw;
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/
