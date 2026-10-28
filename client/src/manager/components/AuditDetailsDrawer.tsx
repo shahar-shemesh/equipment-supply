@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Drawer, IconButton } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
@@ -73,10 +74,7 @@ export function AuditDetailsDrawer({ entry, onClose, onFilterIssuance, onFilterA
             </section>
           )}
 
-          <details className="audit-drawer__technical">
-            <summary>{t("audit_drawer_technical")}</summary>
-            <pre>{JSON.stringify(e, null, 2)}</pre>
-          </details>
+          <TechnicalDetails entry={e} />
 
           <div className="audit-drawer__actions">
             {e.issuance_id != null && (
@@ -93,5 +91,22 @@ export function AuditDetailsDrawer({ entry, onClose, onFilterIssuance, onFilterA
         </div>
       )}
     </Drawer>
+  );
+}
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//the raw row, folded away. the json is built when the manager unfolds it, not when the drawer opens: a seed or an
+//import row carries a details object of some size and the fold is rarely opened. the flag lives here, not in the
+//drawer, so it goes away with the body and the next row starts folded
+function TechnicalDetails({ entry }: { entry: IAuditEntry }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <details className="audit-drawer__technical" onToggle={(ev) => setOpen(ev.currentTarget.open)}>
+      <summary>{t("audit_drawer_technical")}</summary>
+      {open && <pre>{JSON.stringify(entry, null, 2)}</pre>}
+    </details>
   );
 }

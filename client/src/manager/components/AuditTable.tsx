@@ -1,7 +1,7 @@
-import { useMemo, useRef } from "react";
+import { memo, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@mui/material";
-import { DataGridPremium, GridColDef, GridLocaleText, GridPaginationModel, GridSortModel } from "@mui/x-data-grid-premium";
+import { DataGridPremium, GridColDef, GridLocaleText, GridPaginationModel, GridSortDirection, GridSortModel } from "@mui/x-data-grid-premium";
 import { heIL } from "@mui/x-data-grid-premium/locales";
 import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
@@ -33,11 +33,19 @@ export function orderFromModel(model: GridSortModel): AuditOrder {
   return model[0]?.sort === "asc" ? "asc" : "desc";
 }
 
+//module constants, not literals in the jsx: the virtualizer behind the grid keys its row metadata effect on the
+//getRowHeight function, so a new one on every render made it walk the page and rewrite its store each time (with
+//"auto" heights on top), and a new sortingOrder array re-registers the sort callbacks
+const autoRowHeight = (): "auto" => "auto";
+const pageSizeOptions = [AUDIT_PAGE_SIZE];
+const sortingOrder: GridSortDirection[] = ["desc", "asc"];
+
 /*──────────────────────────────────────────────────────────────────────────*/
 
 //the board's grid (IssuancesTable.tsx) in its read only shape: server paging, the timestamp the only sortable column, a
-//row click opens the drawer. under 900px the rows are cards with the range bar and an order toggle above them
-export function AuditTable({ rows, total, page, loading, order, onPage, onOrder, onOpen }: Props) {
+//row click opens the drawer. under 900px the rows are cards with the range bar and an order toggle above them.
+//memoized: the page renders again when the drawer opens and closes, and nothing here changes then
+export const AuditTable = memo(function AuditTable({ rows, total, page, loading, order, onPage, onOrder, onOpen }: Props) {
   const { t } = useTranslation();
   const { compact } = useBreakpoint();
 
@@ -112,7 +120,7 @@ export function AuditTable({ rows, total, page, loading, order, onPage, onOrder,
       columns={columns}
       loading={loading}
       autoHeight
-      getRowHeight={() => "auto"}
+      getRowHeight={autoRowHeight}
       columnHeaderHeight={48}
       localeText={localeText}
       pagination
@@ -120,12 +128,12 @@ export function AuditTable({ rows, total, page, loading, order, onPage, onOrder,
       rowCount={total}
       paginationModel={paginationModel}
       onPaginationModelChange={(m) => onPage(m.page + 1)}
-      pageSizeOptions={[AUDIT_PAGE_SIZE]}
+      pageSizeOptions={pageSizeOptions}
       sortingMode="server"
       sortModel={sortModel}
       onSortModelChange={(m) => onOrder(orderFromModel(m))}
       //desc <-> asc on the header, never "no sort": the server always orders the timeline
-      sortingOrder={["desc", "asc"]}
+      sortingOrder={sortingOrder}
       disableMultipleColumnsSorting
       disableColumnFilter
       disableColumnMenu
@@ -137,4 +145,4 @@ export function AuditTable({ rows, total, page, loading, order, onPage, onOrder,
       hideFooterSelectedRowCount
     />
   );
-}
+});

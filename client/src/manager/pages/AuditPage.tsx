@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button } from "@mui/material";
 
@@ -46,15 +46,17 @@ export default function AuditPage() {
     load();
   }, [filters, page, order]);
 
-  function changeFilters(next: AuditFilterState) {
+  //the toolbar and the table are memoized (opening the drawer re-rendered the grid and the pickers for nothing, see
+  //AuditTable.tsx), so the two callbacks they get keep their identity; the setters they close over never change
+  const changeFilters = useCallback((next: AuditFilterState) => {
     setFilters(next);
     setPage(1);
-  }
+  }, []);
 
-  function changeOrder(next: AuditOrder) {
+  const changeOrder = useCallback((next: AuditOrder) => {
     setOrder(next);
     setPage(1);
-  }
+  }, []);
 
   //the drawer's two buttons: the chip replaces the row's view of the log with the whole history of that issuance or user
   function filterIssuance(ref: AuditRef) {

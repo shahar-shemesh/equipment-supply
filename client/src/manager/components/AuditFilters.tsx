@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Autocomplete, Button, Checkbox, Chip, InputAdornment, TextField } from "@mui/material";
 import SearchIcon from "@mui/icons-material/Search";
@@ -54,8 +54,9 @@ const actionOptions = Object.values(AuditAction);
 
 //the toolbar of the audit page on the board's classes: the search box and the chips on the first line, the action multi
 //select, the two dates and the clear button on the second. every change goes up at once except the free text, which
-//waits 400 ms like the board's
-export function AuditFilters({ filters, onChange }: { filters: AuditFilterState; onChange: (f: AuditFilterState) => void }) {
+//waits 400 ms like the board's. memoized like the table: the two pickers are not cheap to render and the drawer
+//opening is none of their business
+export const AuditFilters = memo(function AuditFilters({ filters, onChange }: { filters: AuditFilterState; onChange: (f: AuditFilterState) => void }) {
   const { t } = useTranslation();
   const [search, setSearch] = useState(filters.q || "");
 
@@ -114,7 +115,7 @@ export function AuditFilters({ filters, onChange }: { filters: AuditFilterState;
       {invalid && <div className="field-error audit-filters__range-error" role="alert">{t("audit_filter_range_invalid")}</div>}
     </div>
   );
-}
+});
 
 /*──────────────────────────────────────────────────────────────────────────*/
 

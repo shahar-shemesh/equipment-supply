@@ -179,9 +179,11 @@ describe("AuditPage", () => {
     expect(drawer()?.textContent).toContain("audit_action_issuance_edit");
     const cells = Array.from(drawer().querySelectorAll(".audit-changes td")).map((td) => td.textContent);
     expect(cells).toEqual(["audit_field_priority", "priority_normal", "priority_urgent"]);
-    //the raw row is there, folded
+    //the raw row is there, folded, and its json is not built until the fold opens (jsdom fires toggle as a task of its own)
     const technical = drawer().querySelector<HTMLDetailsElement>(".audit-drawer__technical");
     expect(technical.open).toBe(false);
+    expect(technical.querySelector("pre")).toBeNull();
+    await act(async () => { technical.open = true; await new Promise((r) => setTimeout(r, 0)); });
     expect(technical.querySelector("pre").textContent).toContain('"issuance_number": "7000001"');
 
     await click(button(drawer(), "audit_drawer_filter_issuance"));

@@ -131,16 +131,6 @@
     }
 }
 
-// the board page reserves the room of its scrollbar from the first paint. the grid flexes its columns against the width it
-// measures when it mounts, before the rows give the page a scrollbar, and it does not measure again: without this the
-// columns end up 15px wider than their box and the grid scrolls sideways for nothing. scoped to the page that has the
-// board (on the others the gutter would only be a blank strip) and to the widths where it is a grid, not cards
-@include bp.above-compact {
-    html:has(.board) {
-        scrollbar-gutter: stable;
-    }
-}
-
 .board-filters {
     display: flex;
     flex-direction: column;

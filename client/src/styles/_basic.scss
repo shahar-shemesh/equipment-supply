@@ -59,11 +59,18 @@ body,
 // on html, not on body: html's overflow is handed to the viewport, and mobile chrome / safari stop zooming the whole
 // page out to fit the widest element. body must stay overflow visible, otherwise body itself becomes the scroll
 // container and every position: sticky in the app (courier send bar, board widgets) stops sticking.
-// clip is the same clipping without ever creating a scroll container, hidden is the fallback for older browsers
+// clip is the same clipping without ever creating a scroll container, hidden is the fallback for older browsers.
+// the room of the vertical scrollbar is reserved on every page: the viewport is the one scroll container of the app,
+// and whenever its bar came and went (a page shorter than the viewport, rows not loaded yet for a few frames, a grid
+// page change) the whole layout moved 15px sideways. the gutter only counts on a scrolling axis, so overflow-y is
+// spelled out as auto; next to it the browser computes clip as hidden, which on the viewport is the same no sideways
+// scroll. overlay scrollbars (phones, macos) take no room, so there the gutter is a no-op
 html {
     -webkit-text-size-adjust: 100%;
     overflow-x: hidden;
     overflow-x: clip;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
 }
 
 body {
