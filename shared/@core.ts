@@ -386,9 +386,16 @@ export interface IAuditEntry {
   issuance_id: number | null; //set on every row that concerns an issuance, the delivery and conflict rows included
   batch_id: string | null; //shared by the rows of one bulk action (assign, mark urgent, remove couriers)
   details: Record<string, any> | null;
+  // resolved by GET /api/audit for the page it answers, from the live tables: not stored on the row. null when the user,
+  // the issuance or the courier is not there (a deleted account, a system row, a row that names no courier)
+  actor_name: string | null; //users.display_name of actor_user_id
+  issuance_number: string | null; //issuances.sap_number of issuance_id
+  courier_name: string | null; //couriers.name of a courier row's entity_id, or of details.courier_id on an assign row; inactive couriers included
 }
 
-// GET /api/audit?issuance_id=&actor_user_id=&action=&from=&to=&page=&size=  -  newest first
+// GET /api/audit?q=&issuance_id=&actor_user_id=&action=a,b&from=&to=&order=asc|desc&page=&size=  -  newest first unless
+// order=asc. q is a text search over the actor (username, display name) and the issuance number; action takes one value
+// or a comma list
 export interface IAuditPage {
   items: IAuditEntry[];
   total: number;

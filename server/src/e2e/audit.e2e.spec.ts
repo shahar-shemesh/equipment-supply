@@ -336,6 +336,10 @@ describe('courier rows', () => {
         expect(removedRows).toHaveLength(2);
         expect(new Set(removedRows.map((r) => r.batch_id)).size).toBe(1);
         expect(removedRows.map((r) => r.details.name).sort()).toEqual(['courier two', 'ישראל ישראלי'].sort());
+        //the name the screen prints comes from the couriers row by entity_id, inactive rows included: the removed two are
+        //still named, and the create row names its courier too
+        expect(removedRows.map((r) => r.courier_name).sort()).toEqual(['courier two', 'ישראל ישראלי'].sort());
+        expect((await rowsOf(f.managerToken, AuditAction.courier_create))[0]).toMatchObject({ courier_name: 'ישראל ישראלי', issuance_number: null, actor_name: 'דנה' });
 
         //back under the same id number: a reactivation of the same row, not a second create
         const back = await post('/api/couriers', f.managerToken, { ...form, name: 'ישראל חוזר' });
@@ -391,14 +395,58 @@ describe('login and reading the log', () => {
         expect((await audit(f.managerToken, 'to=2000-01-01')).total).toBe(0);
         expect((await audit(f.managerToken, 'from=2999-01-01')).total).toBe(0);
 
-        for (const bad of ['size=101', 'size=0', 'page=0', 'action=issuance.explode', 'issuance_id=abc', 'actor_user_id=1x', 'from=yesterday', 'to=2026-13-45']) {
+        for (const bad of ['size=101', 'size=0', 'page=0', 'action=issuance.explode', 'issuance_id=abc', 'actor_user_id=1x', 'from=yesterday', 'to=2026-13-45', 'order=sideways', `action=${AuditAction.issuance_assign},issuance.explode`, `action=${AuditAction.issuance_assign}&action=${AuditAction.issuance_edit}`, `q=${'x'.repeat(101)}`]) {
             const res = await get(`/api/audit?${bad}`, f.managerToken);
             expect([bad, res.status]).toEqual([bad, 400]);
         }
 
         const shape = (await audit(f.managerToken, 'size=1')).items[0];
-        expect(Object.keys(shape).sort()).toEqual(['action', 'actor_role', 'actor_type', 'actor_user_id', 'actor_username', 'at', 'batch_id', 'details', 'entity_id', 'entity_type', 'id', 'issuance_id']);
+        expect(Object.keys(shape).sort()).toEqual(['action', 'actor_name', 'actor_role', 'actor_type', 'actor_user_id', 'actor_username', 'at', 'batch_id', 'courier_name', 'details', 'entity_id', 'entity_type', 'id', 'issuance_id', 'issuance_number']);
         expect(isNaN(Date.parse(shape.at))).toBe(false);
+    });
+
+    //what the audit screen sends: the oldest first order, a list of actions, the text search, and the names it prints
+    it('order=asc, a comma list of actions, the text search over the actor and the issuance number, and the resolved names', async () => {
+        const f = await fixture();
+        expect((await patch(`/api/issuances/${f.issuance.id}`, f.managerToken, { priority: Priority.urgent })).status).toBe(200);
+        expect((await post('/api/issuances/assign', f.managerToken, { ids: [f.issuance.id], courier_id: f.otherCourier.id })).status).toBe(201);
+
+        const newest = (await audit(f.managerToken)).items.map((r) => r.id);
+        const oldest = await audit(f.managerToken, 'order=asc');
+        expect(oldest.items.map((r) => r.id)).toEqual([...newest].reverse());
+        expect(oldest.items.map((r) => r.action)).toEqual([AuditAction.auth_login, AuditAction.auth_login, AuditAction.issuance_edit, AuditAction.issuance_assign]);
+        expect((await audit(f.managerToken, 'order=desc')).items.map((r) => r.id)).toEqual(newest);
+
+        const two = await audit(f.managerToken, `action=${AuditAction.issuance_assign},${AuditAction.issuance_edit}`);
+        expect(two.total).toBe(2);
+        expect(two.items.map((r) => r.action)).toEqual([AuditAction.issuance_assign, AuditAction.issuance_edit]);
+        expect((await audit(f.managerToken, `action=${AuditAction.issuance_edit},${AuditAction.issuance_edit}`)).total).toBe(1);
+
+        //q: the manager by her display name (every row she wrote, the login included), the courier by his, the issuance
+        //by its number, the manager by her username; blank is no filter
+        expect((await audit(f.managerToken, `q=${encodeURIComponent('דנה')}`)).items.map((r) => r.action)).toEqual([AuditAction.issuance_assign, AuditAction.issuance_edit, AuditAction.auth_login]);
+        expect((await audit(f.managerToken, 'q=courier')).items.map((r) => [r.action, r.actor_username])).toEqual([[AuditAction.auth_login, 'c']]);
+        expect((await audit(f.managerToken, 'q=7000001')).items.map((r) => r.action)).toEqual([AuditAction.issuance_assign, AuditAction.issuance_edit]);
+        expect((await audit(f.managerToken, 'q=M')).total).toBe(3); //ilike: the username m, whatever the case
+        expect((await audit(f.managerToken, 'q=')).total).toBe(4);
+        expect((await audit(f.managerToken, 'q=%20%20')).total).toBe(4);
+        expect((await audit(f.managerToken, 'q=nobody')).total).toBe(0);
+        //q and the other filters are an AND
+        expect((await audit(f.managerToken, `q=7000001&action=${AuditAction.issuance_edit}`)).total).toBe(1);
+
+        //the names: the user's current display name, the issuance number, the courier of an assign row from details
+        const assign = (await rowsOf(f.managerToken, AuditAction.issuance_assign))[0];
+        expect(assign).toMatchObject({ actor_name: 'דנה', issuance_number: '7000001', courier_name: 'courier two' });
+        const courierLogin = (await audit(f.managerToken, `actor_user_id=${f.courierUser.id}`)).items[0];
+        expect(courierLogin).toMatchObject({ action: AuditAction.auth_login, actor_name: 'courier', issuance_number: null, courier_name: null });
+
+        //the account deleted after the fact: the row keeps the copied username and the search still finds it by that,
+        //the display name is gone from the answer and from the search
+        await ds.getRepository(User).delete(f.courierUser.id);
+        const orphan = (await audit(f.managerToken, `actor_user_id=${f.courierUser.id}`)).items[0];
+        expect(orphan).toMatchObject({ actor_user_id: f.courierUser.id, actor_username: 'c', actor_name: null });
+        expect((await audit(f.managerToken, 'q=courier')).total).toBe(0);
+        expect((await audit(f.managerToken, 'q=c')).items.map((r) => r.actor_username)).toEqual(['c']);
     });
 });
 
@@ -425,7 +473,10 @@ describe('seed', () => {
         const manager = seedUsers.find((u) => u.role === UserRole.manager);
         const token = await tokenFor(app, manager.username);
         expect(token).toBeTruthy();
-        expect((await audit(token)).items.map((r) => r.action)).toEqual([AuditAction.auth_login, AuditAction.system_seed]);
+        const read = await audit(token);
+        expect(read.items.map((r) => r.action)).toEqual([AuditAction.auth_login, AuditAction.system_seed]);
+        //the system row has no user to name, the login names the seeded manager
+        expect(read.items.map((r) => r.actor_name)).toEqual([manager.display_name, null]);
         //the seeded manager is the mock manager identity: linked to a courier row, so the courier screens open for them
         const me = await get('/api/auth/me', token);
         expect(typeof me.body.courier_id).toBe('number');

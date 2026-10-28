@@ -1,11 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
-import { EntityManager, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 
 import { AuditAction, AuditActorType, AuditEntityType, IAuditEntry, IAuditPage, UserRole } from '../../../shared/@core';
 import { primaryRole } from '../../../shared/auth';
-import { AuditLog } from '../entities';
+import { AuditLog, Courier, Issuance, User } from '../entities';
 import { parseAuditQuery } from './audit.validation';
 
 //what a service hands over for one row. actor is the request's user (id, username, roles; the row keeps the primary
@@ -51,19 +51,63 @@ export class AuditService {
 
   /*──────────────────────────────────────────────────────────────────────────*/
 
-  // GET /api/audit  (manager)  -  newest first. no joins, so plain offset / limit is safe here
+  // GET /api/audit  (manager)  -  newest first unless order=asc. no joins, so plain offset / limit is safe here; the
+  // names the screen prints are looked up afterwards for the one page (namesFor)
   async list(q: any): Promise<IAuditPage> {
     const f = parseAuditQuery(q);
-    const qb = this.rows.createQueryBuilder('a').orderBy('a.at', 'DESC').addOrderBy('a.id', 'DESC');
+    const dir = f.order === 'asc' ? 'ASC' : 'DESC';
+    const qb = this.rows.createQueryBuilder('a').orderBy('a.at', dir).addOrderBy('a.id', dir);
     if (f.issuance_id != null) qb.andWhere('a.issuance_id = :issuanceId', { issuanceId: f.issuance_id });
     if (f.actor_user_id != null) qb.andWhere('a.actor_user_id = :actorId', { actorId: f.actor_user_id });
-    if (f.action) qb.andWhere('a.action = :action', { action: f.action });
+    if (f.actions) qb.andWhere('a.action IN (:...actions)', { actions: f.actions });
     if (f.from) qb.andWhere('a.at >= :from', { from: f.from });
     if (f.to) qb.andWhere('a.at < :to', { to: f.to });
+    //the text search: the username copied on the row, the user's current name (a rename after the fact still finds the
+    //rows) and the issuance number. the OR scans whatever the other filters leave; users and couriers are tiny and
+    //sap_number is unique indexed, fine at this table's growth (docs/api.md). no wildcard escaping, like the board's search
+    if (f.q) {
+      qb.andWhere(
+        '(a.actor_username ILIKE :like OR a.actor_user_id IN (SELECT u.id FROM users u WHERE u.display_name ILIKE :like OR u.username ILIKE :like) OR a.issuance_id IN (SELECT i.id FROM issuances i WHERE i.sap_number ILIKE :like))',
+        { like: `%${f.q}%` },
+      );
+    }
 
     const [rows, total] = await qb.offset((f.page - 1) * f.size).limit(f.size).getManyAndCount();
-    return { items: rows.map(toEntry), total };
+    const names = await this.namesFor(rows);
+    return { items: rows.map((r) => toEntry(r, names)), total };
   }
+
+  /*──────────────────────────────────────────────────────────────────────────*/
+
+  //three IN (...) reads for the ids of one page, each skipped when the page names none. live rows only: a deleted account
+  //has no users row any more (the entry falls back to actor_username), an inactive courier still has its row and is found
+  private async namesFor(rows: AuditLog[]): Promise<Names> {
+    const em = this.rows.manager;
+    const ids = <T>(pick: (r: AuditLog) => T | null | undefined) => Array.from(new Set(rows.map(pick).filter((v) => v != null)));
+    const userIds = ids((r) => r.actor_user_id);
+    const issuanceIds = ids((r) => r.issuance_id);
+    const courierIds = ids(courierIdOf);
+    const [users, issuances, couriers] = await Promise.all([
+      userIds.length ? em.getRepository(User).find({ where: { id: In(userIds) }, select: ['id', 'display_name'] }) : ([] as User[]),
+      issuanceIds.length ? em.getRepository(Issuance).find({ where: { id: In(issuanceIds) }, select: ['id', 'sap_number'] }) : ([] as Issuance[]),
+      courierIds.length ? em.getRepository(Courier).find({ where: { id: In(courierIds) }, select: ['id', 'name'] }) : ([] as Courier[]),
+    ]);
+    return {
+      users: new Map(users.map((u) => [u.id, u.display_name])),
+      issuances: new Map(issuances.map((i) => [i.id, i.sap_number])),
+      couriers: new Map(couriers.map((c) => [c.id, c.name])),
+    };
+  }
+}
+
+type Names = { users: Map<number, string>; issuances: Map<number, string>; couriers: Map<number, string> };
+
+//the courier a row is about: the row's own entity on a courier action, the one in details on an assign (the entity
+//there is the issuance). the delivery rows name a task, not a courier, and get none
+function courierIdOf(r: AuditLog): number | null {
+  if (r.entity_type === AuditEntityType.courier) return r.entity_id;
+  if (r.action === AuditAction.issuance_assign) return typeof r.details?.courier_id === 'number' ? r.details.courier_id : null;
+  return null;
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/
@@ -99,6 +143,13 @@ export function scrub(value: any, depth = 0): any {
   return value;
 }
 
-function toEntry(r: AuditLog): IAuditEntry {
-  return { ...r, at: r.at.toISOString() };
+function toEntry(r: AuditLog, names: Names): IAuditEntry {
+  const courierId = courierIdOf(r);
+  return {
+    ...r,
+    at: r.at.toISOString(),
+    actor_name: (r.actor_user_id != null && names.users.get(r.actor_user_id)) || null,
+    issuance_number: (r.issuance_id != null && names.issuances.get(r.issuance_id)) || null,
+    courier_name: (courierId != null && names.couriers.get(courierId)) || null,
+  };
 }

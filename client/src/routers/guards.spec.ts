@@ -72,6 +72,7 @@ describe("route guards", () => {
   it("a courier on a manager path lands on their own board", async () => {
     mocks.user = courier;
     expect(await open("/manager/issuances")).toBe("courier");
+    expect(await open("/manager/audit")).toBe("courier");
     expect(await open("/courier/tasks/5")).toBe("courier");
     expect(await open("/")).toBe("courier");
   });
@@ -79,6 +80,7 @@ describe("route guards", () => {
   it("a manager holds both roles: the board is home and the courier screens open as well", async () => {
     mocks.user = manager;
     expect(await open("/manager/issuances")).toBe("manager");
+    expect(await open("/manager/audit")).toBe("manager");
     expect(await open("/courier")).toBe("courier");
     expect(await open("/")).toBe("manager");
   });

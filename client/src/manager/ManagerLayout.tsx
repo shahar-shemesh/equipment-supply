@@ -5,6 +5,7 @@ import { Drawer, IconButton } from "@mui/material";
 import LogoutIcon from "@mui/icons-material/Logout";
 import MenuIcon from "@mui/icons-material/Menu";
 import CloseIcon from "@mui/icons-material/Close";
+import HistoryIcon from "@mui/icons-material/History";
 
 import { UserRole } from "../../../shared/@core";
 import { hasRole } from "../../../shared/auth";
@@ -61,6 +62,7 @@ export default function ManagerLayout() {
               <NavLink to="/manager/issuances">{t("nav_issuances")}</NavLink>
               <NavLink to="/manager/couriers">{t("nav_couriers")}</NavLink>
               <NavLink to="/manager/conflicts">{t("nav_conflicts")}</NavLink>
+              <NavLink to="/manager/audit"><HistoryIcon fontSize="small" />{t("nav_audit")}</NavLink>
               <NavLink to="/manager/reports">{t("nav_reports")}</NavLink>
               {courierView && <NavLink to="/courier">{t("nav_courier_view")}</NavLink>}
             </nav>
@@ -91,6 +93,7 @@ export default function ManagerLayout() {
           <NavLink to="/manager/issuances" onClick={closeMenu}>{t("nav_issuances")}</NavLink>
           <NavLink to="/manager/couriers" onClick={closeMenu}>{t("nav_couriers")}</NavLink>
           <NavLink to="/manager/conflicts" onClick={closeMenu}>{t("nav_conflicts")}</NavLink>
+          <NavLink to="/manager/audit" onClick={closeMenu}><HistoryIcon fontSize="small" />{t("nav_audit")}</NavLink>
           <NavLink to="/manager/reports" onClick={closeMenu}>{t("nav_reports")}</NavLink>
           {courierView && <NavLink to="/courier" onClick={closeMenu}>{t("nav_courier_view")}</NavLink>}
         </nav>

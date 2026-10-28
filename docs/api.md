@@ -25,7 +25,7 @@ All routes are under `/api` and need `Authorization: Bearer <token>` except `GET
 | `GET /conflicts`, `GET /conflicts/:id` | manager | rejected reports (`?status=pending|reviewed|all&page=&page_size=`, no signatures in the list), one report with its signature next to the current state |
 | `POST /conflicts/:id/review` | manager | `{ note, version }`: mark reviewed; 409 `review_conflict` with the existing review when another manager got there first |
 | `GET /delivery/lookup?number=` | courier | find my task by the printed number |
-| `GET /audit` | manager | the audit log as `IAuditPage { items, total }`, newest first; `?issuance_id=&actor_user_id=&action=&from=&to=&page=&size=` (`page` 1-based, `size` default 50 and at most 100, `from` / `to` an ISO date or date time read as UTC, `to` exclusive and a bare date covering its whole day); a value that is not what the parameter means is a 400, never an empty page |
+| `GET /audit` | manager | the audit log as `IAuditPage { items, total }`, newest first; `?q=&issuance_id=&actor_user_id=&action=&from=&to=&order=&page=&size=` (`q` a text search of at most 100 characters, `ILIKE` over the row's `actor_username`, the user's current `display_name` / `username` and the issuance `sap_number`, an OR that scans the rows the other filters leave, fine at this table's growth; `action` one value or a comma list, `action=issuance.assign,issuance.edit` is an `IN`, a repeated parameter is a 400; `order` `asc` or `desc`, default `desc`, on `at` then `id`; `page` 1-based, `size` default 50 and at most 100, `from` / `to` an ISO date or date time read as UTC, `to` exclusive and a bare date covering its whole day); every item carries `actor_name`, `issuance_number` and `courier_name`, resolved from the live tables for that page and null when the user, the issuance or the courier is not there; a value that is not what the parameter means is a 400, never an empty page |
 | `GET /xml-export` | manager | the xml export outbox as `IXmlExportOverview { counts, failed }`: `counts` by status plus `retry_waiting` (pending rows whose retry time is still ahead) and `lease_expired` (processing rows a worker left behind), and the failed rows (`IXmlExportEvent`, oldest first, at most 100) with their `last_error`; see [XML export](xml-export.md#investigating-and-retrying) |
 | `POST /xml-export/:id/retry` | manager | a failed row goes back to the queue (`pending`, `attempts` 0, lease and error cleared), answers the row as `IXmlExportEvent`, 201; 409 `{ statusCode: 409, message, code: 'not_failed', status }` for a row that is not failed, 404 for an unknown id, 400 for a value that is not a uuid; writes an `xml_export.retry` audit row |
 
@@ -43,6 +43,10 @@ Made for the offline work, in `shared/@core.ts`:
 Made for the audit log, in `shared/@core.ts`:
 
 - `GET /audit` is new, manager only, see the audit paragraph under [Rules enforced on the server](domain.md#rules-enforced-on-the-server) for what is recorded. The shared types are `AuditActorType`, `AuditAction` (the closed action list), `AuditEntityType`, `IAuditEntry` and `IAuditPage`. No other route changed its body or its status codes; `POST /issuances/mark-urgent` still answers `{ updated }` with the count of editable rows.
+
+Made for the audit log screen (יומן פעילות, `/manager/audit`), in `shared/@core.ts`:
+
+- `GET /audit` gained `q`, `order` and the comma list for `action`, see the table above; the single value, the other filters and the paging answer as before. `IAuditEntry` gained three display fields the client prints instead of ids: `actor_name`, `issuance_number` and `courier_name` (all `string | null`), looked up per page after the main query (no join, so offset / limit stays safe). The row itself and what the services write did not change.
 
 Made for the self pickup handover, in `shared/@core.ts`:
 

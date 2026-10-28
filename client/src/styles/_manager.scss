@@ -1467,3 +1467,258 @@
         padding: 12px;
     }
 }
+
+// יומן פעילות (AuditPage.tsx): the board's toolbar and grid skin, read only. the extras of its toolbar sit here under
+// the page so the board's blocks stay as they are
+.audit-page {
+    &__title {
+        margin-bottom: 24px;
+
+        p {
+            margin: 6px 0 0;
+            max-width: 720px;
+        }
+
+        @include bp.phone {
+            margin-bottom: 16px;
+        }
+    }
+
+    &__error.MuiAlert-root {
+        margin-bottom: 16px;
+    }
+
+    // the two chips the drawer sets, next to the search box on the first line
+    .audit-filters__chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    // the action multi select: the picked actions as chips on one line with "+N" while the field rests, the whole list
+    // while it is searched (the city filter does the same)
+    .audit-filters__actions {
+        .MuiAutocomplete-inputRoot {
+            flex-wrap: nowrap;
+        }
+
+        &.Mui-focused .MuiAutocomplete-inputRoot {
+            flex-wrap: wrap;
+        }
+    }
+
+    // a window that ends before it starts: both date fields in the error color until one of them moves. the pickers
+    // field has its own outline class, two classes so the rule outweighs its emotion styles
+    .audit-filters__date.is-invalid {
+        .MuiPickersOutlinedInput-notchedOutline,
+        .MuiOutlinedInput-notchedOutline {
+            border-color: var(--color-danger);
+        }
+    }
+
+    .audit-filters__range-error {
+        margin-top: -4px;
+    }
+
+    // a row opens the drawer
+    .audit-grid.MuiDataGrid-root .MuiDataGrid-row {
+        cursor: pointer;
+    }
+
+    @include bp.above-compact {
+        .audit-filters {
+            margin-bottom: 16px;
+        }
+    }
+}
+
+// the phone version of the audit grid, one card per event (AuditTable.tsx). the whole card is a button
+.audit-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+
+    &--loading {
+        opacity: 0.6;
+    }
+
+    // the order toggle after the page arrows in the range bar, pushed to the end side
+    &__order.MuiButton-root {
+        margin-inline-start: auto;
+        min-height: 32px;
+        padding: 0 8px;
+        font-size: 13px;
+    }
+
+    &__empty {
+        text-align: center;
+        color: var(--color-text-secondary);
+        padding: 40px 16px;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: 12px;
+    }
+}
+
+.audit-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 10px 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    text-align: start;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    width: 100%;
+
+    &:focus-visible {
+        outline: 2px solid var(--color-primary);
+        outline-offset: 2px;
+    }
+
+    &__row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        font-size: 14px;
+
+        >span {
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+
+        label {
+            color: var(--color-text-secondary);
+            margin-inline-end: 4px;
+        }
+
+        &--head {
+            font-size: 15px;
+
+            .muted {
+                white-space: nowrap;
+                font-size: 13px;
+            }
+        }
+    }
+
+    &__summary {
+        font-size: 14px;
+        overflow-wrap: anywhere;
+    }
+}
+
+// one event in a drawer on the end side (AuditDetailsDrawer.tsx), the detail dialog's sections inside it. the whole
+// screen on a phone, like the dialogs there
+.audit-drawer {
+    .MuiDrawer-paper {
+        width: 520px;
+        max-width: 100vw;
+
+        @include bp.phone {
+            width: 100vw;
+        }
+    }
+
+    &__body {
+        padding: 24px 28px calc(28px + var(--safe-bottom));
+        display: flex;
+        flex-direction: column;
+
+        @include bp.phone {
+            padding: 16px 16px calc(16px + var(--safe-bottom));
+        }
+
+        .detail-dialog__section h3 {
+            margin: 0 0 8px;
+            font-size: 15px;
+        }
+    }
+
+    &__action {
+        font-weight: 600;
+        font-size: 18px;
+    }
+
+    &__summary {
+        margin: 4px 0 0;
+        color: var(--color-text-secondary);
+    }
+
+    // the raw row, folded. a reader who needs an id finds it here, the sections above are the readable view
+    &__technical {
+        margin-top: 16px;
+        font-size: 13px;
+
+        summary {
+            cursor: pointer;
+            color: var(--color-text-secondary);
+        }
+
+        pre {
+            margin: 8px 0 0;
+            padding: 12px;
+            background: var(--color-surface-2);
+            border-radius: 8px;
+            overflow: auto;
+            direction: ltr;
+            text-align: left;
+            font-size: 12px;
+            max-height: 320px;
+        }
+    }
+
+    &__actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 24px;
+
+        @include bp.phone {
+            flex-direction: column;
+
+            .MuiButton-root {
+                width: 100%;
+            }
+        }
+    }
+}
+
+// the before / after table of an edit: field, previous value, new value
+.audit-changes {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+
+    th,
+    td {
+        text-align: start;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--color-border);
+        vertical-align: top;
+        overflow-wrap: anywhere;
+    }
+
+    th {
+        color: var(--color-text-secondary);
+        font-weight: 500;
+    }
+
+    tr:last-child td {
+        border-bottom: none;
+    }
+
+    // the field name keeps its line, the two values take the room
+    td:first-child {
+        white-space: nowrap;
+        font-weight: 500;
+    }
+
+    td:nth-child(2) {
+        color: var(--color-text-secondary);
+    }
+}

@@ -17,8 +17,11 @@ import TaskDetailPage from "../courier/pages/TaskDetailPage";
 import ReportDetailPage from "../courier/pages/ReportDetailPage";
 
 //the board pulls in the data grid: a chunk of its own, out of the entry bundle and out of the courier's precache
-//(globIgnores in vite.config.ts)
+//(globIgnores in vite.config.ts). the audit log sits on the same grid and gets the same treatment
 const IssuancesBoard = lazy(() => import("../manager/pages/IssuancesBoard"));
+const AuditPage = lazy(() => import("../manager/pages/AuditPage"));
+
+const chunkFallback = <div className="page-loading"><CircularProgress /></div>;
 
 //two separate trees, like the information architecture diagram: צד מנהל מחסן under /manager, צד משנע under /courier
 export function AppRouter() {
@@ -29,9 +32,10 @@ export function AppRouter() {
 
         <Route path="/manager" element={<RequireRole role={UserRole.manager}><ManagerLayout /></RequireRole>}>
           <Route index element={<Navigate to="issuances" replace />} />
-          <Route path="issuances" element={<ChunkBoundary><Suspense fallback={<div className="page-loading"><CircularProgress /></div>}><IssuancesBoard /></Suspense></ChunkBoundary>} />
+          <Route path="issuances" element={<ChunkBoundary><Suspense fallback={chunkFallback}><IssuancesBoard /></Suspense></ChunkBoundary>} />
           <Route path="couriers" element={<CouriersPage />} />
           <Route path="conflicts" element={<ConflictsPage />} />
+          <Route path="audit" element={<ChunkBoundary><Suspense fallback={chunkFallback}><AuditPage /></Suspense></ChunkBoundary>} />
           <Route path="reports" element={<ReportsPage />} />
         </Route>
 

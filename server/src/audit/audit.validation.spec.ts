@@ -1,7 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 
 import { AuditAction } from '../../../shared/@core';
-import { parseAuditQuery, SIZE_DEFAULT, SIZE_MAX } from './audit.validation';
+import { parseAuditQuery, Q_MAX, SIZE_DEFAULT, SIZE_MAX } from './audit.validation';
 
 function expect400(q: any, contains: string) {
     let err: any;
@@ -16,14 +16,37 @@ function expect400(q: any, contains: string) {
 
 describe('parseAuditQuery', () => {
     it('an empty query is the first page of everything', () => {
-        expect(parseAuditQuery({})).toEqual({ issuance_id: null, actor_user_id: null, action: null, from: null, to: null, page: 1, size: SIZE_DEFAULT });
+        expect(parseAuditQuery({})).toEqual({ q: null, issuance_id: null, actor_user_id: null, actions: null, from: null, to: null, order: 'desc', page: 1, size: SIZE_DEFAULT });
         expect(parseAuditQuery(undefined).page).toBe(1);
-        expect(parseAuditQuery({ issuance_id: '', action: '', from: '' })).toMatchObject({ issuance_id: null, action: null, from: null });
+        expect(parseAuditQuery({ q: '', issuance_id: '', action: '', from: '', order: '' })).toMatchObject({ q: null, issuance_id: null, actions: null, from: null, order: 'desc' });
     });
 
     it('reads the filters the way the query string sends them', () => {
-        const q = parseAuditQuery({ issuance_id: '5', actor_user_id: '2', action: AuditAction.issuance_assign, page: '3', size: '20' });
-        expect(q).toMatchObject({ issuance_id: 5, actor_user_id: 2, action: AuditAction.issuance_assign, page: 3, size: 20 });
+        const q = parseAuditQuery({ q: ' דנה ', issuance_id: '5', actor_user_id: '2', action: AuditAction.issuance_assign, order: 'asc', page: '3', size: '20' });
+        expect(q).toMatchObject({ q: 'דנה', issuance_id: 5, actor_user_id: 2, actions: [AuditAction.issuance_assign], order: 'asc', page: 3, size: 20 });
+    });
+
+    it('action takes a comma list, the same member twice is one, and a repeated parameter is still a 400', () => {
+        expect(parseAuditQuery({ action: `${AuditAction.issuance_assign},${AuditAction.issuance_edit}` }).actions).toEqual([AuditAction.issuance_assign, AuditAction.issuance_edit]);
+        expect(parseAuditQuery({ action: `${AuditAction.issuance_edit}, ${AuditAction.issuance_edit}` }).actions).toEqual([AuditAction.issuance_edit]);
+        expect400({ action: `${AuditAction.issuance_assign},issuance.explode` }, 'unknown action issuance.explode');
+        expect400({ action: `${AuditAction.issuance_assign},` }, 'unknown action');
+        expect400({ action: [AuditAction.issuance_assign, AuditAction.issuance_edit] }, 'unknown action');
+    });
+
+    it('q is trimmed text: blank is no filter, over the cap or not a string is a 400', () => {
+        expect(parseAuditQuery({ q: '   ' }).q).toBeNull();
+        expect(parseAuditQuery({ q: 'x'.repeat(Q_MAX) }).q).toHaveLength(Q_MAX);
+        expect400({ q: 'x'.repeat(Q_MAX + 1) }, `q is at most ${Q_MAX}`);
+        expect400({ q: ['a', 'b'] }, 'q must be text');
+    });
+
+    it('order is asc or desc, newest first when absent, anything else a 400', () => {
+        expect(parseAuditQuery({ order: 'asc' }).order).toBe('asc');
+        expect(parseAuditQuery({ order: 'desc' }).order).toBe('desc');
+        expect400({ order: 'sideways' }, 'order must be asc or desc');
+        expect400({ order: 'ASC' }, 'order must be asc or desc');
+        expect400({ order: ['asc'] }, 'order must be asc or desc');
     });
 
     it('size is capped at the maximum and page starts at 1', () => {
