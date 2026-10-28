@@ -13,6 +13,7 @@ import HandshakeIcon from "@mui/icons-material/Handshake";
 import { IIssuance, IIssuanceItem, Priority } from "../../../../shared/@core";
 import { IssuanceAction, canDo } from "../../../../shared/@rules";
 import { reasonKeys, statusKeys } from "../../../../shared/@utils";
+import { DateField } from "../../components/DateField";
 import { StatusBadge } from "../../components/StatusBadge";
 import { del, errorMessage, get, patch } from "../../utils/service";
 import { displayNumber, fullAddress } from "../../utils/format";
@@ -190,7 +191,7 @@ export function IssuanceDetailDialog({ id, onClose, onChanged, onAssign }: Props
             <section className="detail-dialog__section detail-dialog__actions">
               <div className="field">
                 <label><CalendarMonthIcon fontSize="inherit" /> {t("detail_delivery_date")}</label>
-                <TextField type="date" value={issuance.delivery_date || ""} disabled={!can("edit")} onChange={(e) => update({ delivery_date: e.target.value })} />
+                <DateField value={issuance.delivery_date || ""} disabled={!can("edit")} onChange={(next) => update({ delivery_date: next })} />
               </div>
               {can("self_pickup") && (
                 <Button variant="outlined" startIcon={<PersonIcon />} onClick={() => update({ self_pickup: true })}>

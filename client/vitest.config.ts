@@ -8,6 +8,9 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["src/test/setup.ts"],
     include: ["src/**/*.spec.ts"],
+    //the pickers package is esm with directory imports (@mui/material/useMediaQuery) that node's resolver refuses,
+    //vite's does not: the specs that render the date filter get it transformed like the app's own code
+    server: { deps: { inline: [/@mui\/x-date-pickers/] } },
   },
   resolve: {
     alias: {

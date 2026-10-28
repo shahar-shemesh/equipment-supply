@@ -2,7 +2,7 @@ import dayjs from "dayjs";
 import { act, createElement } from "react";
 import { createRoot, Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BoardFilters, DateFilterField, emptyFilters, initialFilters, toQuery } from "./BoardFilters";
+import { BoardFilters, CityFilterField, emptyFilters, initialFilters, toQuery } from "./BoardFilters";
 
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 
@@ -32,14 +32,21 @@ describe("initialFilters", () => {
 
 /*──────────────────────────────────────────────────────────────────────────*/
 
-//what the browser does when a date is picked in a native date input: the new value and an input event
-function pick(input: HTMLInputElement, value: string) {
+//the popups (the calendar, the city list) are rendered into the body, outside the host
+const calendar = () => document.querySelector<HTMLElement>("[role=dialog]");
+const button = (within: ParentNode, text: string) => Array.from(within.querySelectorAll<HTMLButtonElement>("button")).find((b) => b.textContent === text);
+const cityOptions = () => Array.from(document.querySelectorAll<HTMLElement>("[role=listbox] [role=option]"));
+
+//what the browser does when text is typed into the search box: the focus, the new value and an input event
+function type(input: HTMLInputElement, value: string) {
+  input.focus();
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, value);
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-//the delivery date: the field prints DD/MM/YYYY, the native input under it picks and the board still gets YYYY-MM-DD
-describe("DateFilterField", () => {
+//the toolbar wiring: the date field (components/DateField.tsx, its own spec) writes the date key of the board's filters
+//and leaves every other filter as it was
+describe("board date filter", () => {
   let root: Root;
   let host: HTMLDivElement;
   let onChange: any;
@@ -57,90 +64,91 @@ describe("DateFilterField", () => {
     host.remove();
   });
 
-  async function render(value: string) {
-    await act(async () => root.render(createElement(DateFilterField, { value, onChange })));
+  it("a pick or a clear changes the date and nothing else", async () => {
+    const filters = { ...emptyFilters, date: "2026-10-07", customer: "כהן", status: ["assigned"], city: ["חיפה"] };
+    await act(async () => root.render(createElement(BoardFilters, { filters, cities: ["חיפה"], onChange })));
+    expect(host.querySelector<HTMLInputElement>(".board-filters__date input").value).toBe("07/10/2026");
+    expect(host.querySelector(".board-filters__date").textContent).toContain("filter_date");
+
+    await act(async () => host.querySelector<HTMLButtonElement>("button[title=open_calendar]").click());
+    await act(async () => button(calendar(), "12").click());
+    expect(onChange).toHaveBeenLastCalledWith({ ...filters, date: "2026-10-12" });
+    await act(async () => host.querySelector<HTMLButtonElement>("button[title='נקה ערך']").click());
+    expect(onChange).toHaveBeenLastCalledWith({ ...filters, date: "" });
+  });
+});
+
+/*──────────────────────────────────────────────────────────────────────────*/
+
+//the city filter: the field searches, the list has a checkbox per city, nothing picked is every city
+describe("CityFilterField", () => {
+  const cities = ["תל אביב", "חיפה", "באר שבע"];
+  let root: Root;
+  let host: HTMLDivElement;
+  let onChange: any;
+
+  beforeEach(() => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    onChange = vi.fn();
+    host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    host.remove();
+  });
+
+  async function render(value: string[]) {
+    await act(async () => root.render(createElement(CityFilterField, { value, cities, onChange })));
     return {
-      shown: host.querySelector<HTMLInputElement>("input:not([type=date])"),
-      native: host.querySelector<HTMLInputElement>("input[type=date]"),
+      input: host.querySelector<HTMLInputElement>("input[role=combobox]"),
+      open: host.querySelector<HTMLButtonElement>("button[title=filter_city_open]"),
     };
   }
 
-  it("prints the day first and keeps the native value as the iso date", async () => {
-    const { shown, native } = await render("2026-10-07");
-    expect(shown.value).toBe("07/10/2026");
-    expect(native.value).toBe("2026-10-07");
+  it("lists every city with a checkbox, the picked ones checked, and a click picks one more without closing the list", async () => {
+    const { open } = await render(["חיפה"]);
+    await act(async () => open.click());
+    expect(cityOptions().map((o) => o.textContent)).toEqual(cities);
+    expect(cityOptions().map((o) => o.querySelector<HTMLInputElement>("input[type=checkbox]").checked)).toEqual([false, true, false]);
+    await act(async () => cityOptions()[0].click());
+    expect(onChange).toHaveBeenCalledWith(["חיפה", "תל אביב"]);
+    expect(cityOptions()).toHaveLength(3);
   });
 
-  it("shows the hebrew placeholder when there is no date", async () => {
-    const { shown } = await render("");
-    expect(shown.value).toBe("");
-    expect(shown.placeholder).toBe("filter_date_placeholder");
+  it("narrows the list to the typed text, marks the match, and says so when no city has it", async () => {
+    const { input } = await render([]);
+    expect(input.placeholder).toBe("filter_city_search");
+    await act(async () => type(input, "באר"));
+    expect(cityOptions().map((o) => o.textContent)).toEqual(["באר שבע"]);
+    expect(cityOptions()[0].querySelector("mark").textContent).toBe("באר");
+    await act(async () => cityOptions()[0].click());
+    expect(onChange).toHaveBeenCalledWith(["באר שבע"]);
+
+    await act(async () => type(input, "ירושלים"));
+    expect(cityOptions()).toHaveLength(0);
+    expect(document.body.textContent).toContain("filter_city_none");
   });
 
-  it("passes a picked date up as YYYY-MM-DD", async () => {
-    const { native } = await render("2026-10-07");
-    await act(async () => pick(native, "2026-10-12"));
-    expect(onChange).toHaveBeenCalledWith("2026-10-12");
+  //limitTags: the field at rest shows one chip and counts the rest, so the toolbar's row keeps its height
+  it("shows the picked cities as chips, one with a count while the field rests, and takes one off with its x", async () => {
+    const { input } = await render(["חיפה", "תל אביב"]);
+    expect(input.placeholder).toBe("");
+    const chips = () => Array.from(host.querySelectorAll<HTMLElement>(".MuiChip-root"));
+    expect(chips().map((c) => c.textContent)).toEqual(["חיפה"]);
+    expect(host.textContent).toContain("+1");
+    await act(async () => chips()[0].querySelector<SVGElement>(".MuiChip-deleteIcon").dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(onChange).toHaveBeenCalledWith(["תל אביב"]);
   });
 
-  //the popup belongs to the native input: a call on the visible read-only field would open nothing. the mock sits on that
-  //one element, so a call on any other input does not count
-  it("opens the native input's picker from a click and from Enter, Space and ArrowDown, from no other key", async () => {
-    const { shown, native } = await render("2026-10-07");
-    const showPicker = vi.fn();
-    (native as any).showPicker = showPicker;
-    const press = (key: string) => act(async () => { shown.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })); });
-
-    await act(async () => host.querySelector<HTMLElement>(".board-filters__date").click());
-    expect(showPicker).toHaveBeenCalledTimes(1);
-    await press("Enter");
-    await press(" ");
-    await press("ArrowDown");
-    expect(showPicker).toHaveBeenCalledTimes(4);
-    await press("Tab");
-    await press("a");
-    expect(showPicker).toHaveBeenCalledTimes(4);
-  });
-
-  //the native input cleared its date with these keys, the read-only field takes them over. nothing to clear = no change event
-  it("clears the date with Backspace and Delete, and does nothing when there is no date", async () => {
-    const { shown } = await render("2026-10-07");
-    const press = (key: string) => act(async () => { shown.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })); });
-    await press("Backspace");
-    await press("Delete");
-    expect(onChange).toHaveBeenCalledTimes(2);
-    expect(onChange).toHaveBeenLastCalledWith("");
-
-    onChange.mockClear();
-    const empty = await render("");
-    await act(async () => { empty.shown.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true })); });
-    expect(onChange).not.toHaveBeenCalled();
-  });
-
-  //an old Safari has no showPicker, and a browser can refuse it (no user gesture): the click must not throw, the native
-  //input takes the focus instead
-  it.each([
-    ["has no showPicker", undefined],
-    ["refuses to open it", () => { throw new Error("NotAllowedError"); }],
-  ])("hands the focus to the native input when the browser %s", async (_case, showPicker) => {
-    const { native } = await render("2026-10-07");
-    if (showPicker) (native as any).showPicker = showPicker;
-    else expect((native as any).showPicker).toBeUndefined();
-    await act(async () => host.querySelector<HTMLElement>(".board-filters__date").click());
-    expect(document.activeElement).toBe(native);
-  });
-
-  //the toolbar wiring: the date field writes the date key of the board's filters and leaves every other filter as it was
-  it("is the board's date filter: a pick or a clear changes the date and nothing else", async () => {
+  //the toolbar wiring: the city field writes the city key of the board's filters and leaves every other filter as it was
+  it("is the board's city filter: a pick changes the cities and nothing else", async () => {
     const filters = { ...emptyFilters, date: "2026-10-07", customer: "כהן", status: ["assigned"], city: ["חיפה"] };
-    await act(async () => root.render(createElement(BoardFilters, { filters, cities: ["חיפה"], onChange })));
-    const shown = host.querySelector<HTMLInputElement>(".board-filters__date input:not([type=date])");
-    const native = host.querySelector<HTMLInputElement>("input[type=date]");
-    expect(shown.value).toBe("07/10/2026");
-
-    await act(async () => pick(native, "2026-10-12"));
-    expect(onChange).toHaveBeenLastCalledWith({ ...filters, date: "2026-10-12" });
-    await act(async () => pick(native, ""));
-    expect(onChange).toHaveBeenLastCalledWith({ ...filters, date: "" });
+    await act(async () => root.render(createElement(BoardFilters, { filters, cities, onChange })));
+    await act(async () => host.querySelector<HTMLButtonElement>("button[title=filter_city_open]").click());
+    await act(async () => cityOptions()[2].click());
+    expect(onChange).toHaveBeenLastCalledWith({ ...filters, city: ["חיפה", "באר שבע"] });
   });
 });

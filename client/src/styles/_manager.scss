@@ -219,16 +219,56 @@
             align-items: center;
             gap: 16px;
 
-            .MuiTextField-root {
+            .MuiTextField-root,
+            .MuiPickersTextField-root,
+            .MuiAutocomplete-root {
                 flex: 1 1 180px;
                 max-width: 220px;
             }
         }
 
-        .MuiTextField-root {
+        // the date picker's field is a pickers text field and the city filter an autocomplete around one: the same box
+        // as their neighbours
+        .MuiTextField-root,
+        .MuiPickersTextField-root,
+        .MuiAutocomplete-root {
             min-width: 0;
             width: 100%;
             background: var(--color-surface);
+        }
+    }
+
+    // the picker's field carries two buttons next to the date and does not fit half a phone row (the date lost its first
+    // digits at 375): there it takes the whole row, like the clear button
+    &__date {
+        @include bp.phone {
+            grid-column: 1 / -1;
+        }
+    }
+
+    // the city filter: the picked cities as chips on one line with "+N" while the field rests, the whole list while it
+    // is searched
+    &__city {
+        .MuiAutocomplete-inputRoot {
+            flex-wrap: nowrap;
+        }
+
+        &.Mui-focused .MuiAutocomplete-inputRoot {
+            flex-wrap: wrap;
+        }
+    }
+
+    // a line of the city list (in a popper under the body, not inside the toolbar): the match of the typed text in bold
+    &__city-option {
+        .MuiCheckbox-root {
+            padding: 4px;
+            margin-inline-end: 4px;
+        }
+
+        mark {
+            background: none;
+            color: inherit;
+            font-weight: 600;
         }
     }
 
@@ -245,33 +285,19 @@
             justify-self: stretch;
         }
     }
+}
 
-    // the delivery date prints DD/MM/YYYY itself (BoardFilters.tsx), the native input under its bottom edge only opens
-    // the picker. the whole field is the button
-    &__date {
-        cursor: pointer;
-
-        .MuiInputBase-root,
-        .MuiInputBase-input {
-            cursor: pointer;
-        }
-
-        // the shrunk label takes clicks and hands each one on to the input: a tap on it would ask for the picker twice
-        .MuiInputLabel-root {
-            pointer-events: none;
-        }
-    }
-
-    &__native-date {
-        position: absolute;
-        inset-inline: 0;
-        bottom: 0;
-        width: 100%;
-        height: 1px;
-        padding: 0;
-        border: none;
-        opacity: 0;
-        pointer-events: none;
+// the date picker's dialog (components/DateField.tsx, the touch screen variant) on a phone keeps mui's own centred box:
+// the theme turns every dialog into a full page there (RtlTheme.tsx), which leaves a month of days and its two buttons
+// floating in an empty screen
+.date-field__dialog .MuiDialog-paper {
+    @include bp.phone {
+        margin: 32px;
+        width: auto;
+        max-width: calc(100% - 64px);
+        height: auto;
+        max-height: calc(100% - 64px);
+        border-radius: 8px;
     }
 }
 
@@ -1037,7 +1063,8 @@
             }
         }
 
-        .MuiTextField-root {
+        .MuiTextField-root,
+        .MuiPickersTextField-root {
             background: var(--color-surface);
         }
     }

@@ -1,14 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Checkbox, InputAdornment, ListItemText, MenuItem, TextField } from "@mui/material";
+import { Autocomplete, Button, Checkbox, InputAdornment, MenuItem, TextField } from "@mui/material";
 import SearchIcon from "@mui/icons-material/Search";
-import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import dayjs from "dayjs";
 
 import { IssuanceStatus, Priority } from "../../../../shared/@core";
 import { priorityKeys } from "../../../../shared/@utils";
+import { DateField } from "../../components/DateField";
 import { StatusBadge } from "../../components/StatusBadge";
-import { formatDate } from "../../utils/format";
 
 //status and city are lists (the quick actions, the multi select), everything else is one value or nothing
 export const emptyFilters = { search: "", status: [] as string[], priority: "", customer: "", city: [] as string[], date: "" };
@@ -75,7 +74,7 @@ export function BoardFilters({ filters, cities, onChange }: { filters: any; citi
       </div>
 
       <div className="board-filters__row">
-        <DateFilterField value={filters.date} onChange={(next) => set("date", next)} />
+        <DateField className="board-filters__date" label={t("filter_date")} value={filters.date} onChange={(next) => set("date", next)} />
 
         <TextField select label={t("filter_priority")} value={filters.priority} onChange={(e) => set("priority", e.target.value)}>
           <MenuItem value="">{t("filter_all")}</MenuItem>
@@ -86,22 +85,7 @@ export function BoardFilters({ filters, cities, onChange }: { filters: any; citi
 
         <TextField label={t("filter_customer")} value={filters.customer} onChange={(e) => set("customer", e.target.value)} />
 
-        {/* any number of cities, the field prints the picked ones. nothing picked = every city */}
-        <TextField
-          select
-          label={t("filter_city")}
-          value={filters.city || []}
-          //browser autofill hands a multiple select one comma string instead of the array, mui documents the split
-          onChange={(e) => set("city", typeof e.target.value === "string" ? (e.target.value as string).split(",") : e.target.value)}
-          SelectProps={{ multiple: true, renderValue: (picked: any) => (picked as string[]).join(", ") }}
-        >
-          {(cities || []).map((c) => (
-            <MenuItem key={c} value={c}>
-              <Checkbox size="small" checked={(filters.city || []).includes(c)} />
-              <ListItemText primary={c} />
-            </MenuItem>
-          ))}
-        </TextField>
+        <CityFilterField value={filters.city || []} cities={cities || []} onChange={(next) => set("city", next)} />
 
         {dirty && (
           <Button variant="text" className="board-filters__clear" onClick={() => { setSearch(""); onChange(emptyFilters); }}>
@@ -115,51 +99,46 @@ export function BoardFilters({ filters, cities, onChange }: { filters: any; citi
 
 /*──────────────────────────────────────────────────────────────────────────*/
 
-//the native date input prints the browser's own order (mm/dd/yyyy on an english Chrome, whatever the page language is).
-//the field shows the value as DD/MM/YYYY instead, and the native input, invisible under its bottom edge, only does the
-//picking: showPicker() opens its popup right there. the value that goes up stays YYYY-MM-DD, as before
-export function DateFilterField({ value, onChange }: { value: string; onChange: (next: string) => void }) {
+//any number of cities: the field is the search box over the cities of the board, the list has a checkbox per city and
+//stays open while they are picked, the picked ones sit in the field as chips. nothing picked = every city
+export function CityFilterField({ value, cities, onChange }: { value: string[]; cities: string[]; onChange: (next: string[]) => void }) {
   const { t } = useTranslation();
-  const native = useRef<HTMLInputElement>(null);
-
-  function open() {
-    try {
-      native.current.showPicker();
-    } catch {
-      native.current.focus(); //no showPicker (an old Safari): the native input at least takes the keyboard
-    }
-  }
 
   return (
-    <TextField
-      className="board-filters__date"
-      label={t("filter_date")}
-      value={value ? formatDate(value) : ""}
-      placeholder={t("filter_date_placeholder")}
-      onClick={open}
-      InputLabelProps={{ shrink: true }}
-      InputProps={{
-        readOnly: true,
-        startAdornment: <InputAdornment position="start"><CalendarMonthIcon /></InputAdornment>,
-        //inside the input root on purpose: it is position: relative, so the popup opens under this very field
-        endAdornment: <input ref={native} type="date" className="board-filters__native-date" tabIndex={-1} aria-hidden value={value} onChange={(e) => onChange(e.target.value)} />,
+    <Autocomplete
+      multiple
+      disableCloseOnSelect
+      className="board-filters__city"
+      options={cities}
+      value={value}
+      onChange={(_, next) => onChange(next)}
+      limitTags={1}
+      ChipProps={{ size: "small" }}
+      noOptionsText={t("filter_city_none")}
+      openText={t("filter_city_open")}
+      closeText={t("close")}
+      clearText={t("clear")}
+      renderOption={(props, city, { selected, inputValue }) => {
+        const { key, ...rest } = props;
+        return (
+          <li key={key} {...rest} className={`${rest.className} board-filters__city-option`}>
+            <Checkbox size="small" checked={selected} tabIndex={-1} />
+            <Highlight text={city} query={inputValue} />
+          </li>
+        );
       }}
-      inputProps={{
-        "aria-haspopup": "dialog",
-        title: t("filter_date_open"),
-        onKeyDown: (e: React.KeyboardEvent) => {
-          if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") {
-            e.preventDefault();
-            open();
-          } else if ((e.key === "Backspace" || e.key === "Delete") && value) {
-            //the native input cleared with these keys, the read-only field would swallow them
-            e.preventDefault();
-            onChange("");
-          }
-        },
-      }}
+      renderInput={(params) => <TextField {...params} label={t("filter_city")} placeholder={value.length ? "" : t("filter_city_search")} />}
     />
   );
+}
+
+//the typed text in bold inside a city, the way a search result marks its match. mui's filter ignores the case and the
+//spaces around the text, this follows it
+function Highlight({ text, query }: { text: string; query: string }) {
+  const q = query.trim().toLowerCase();
+  const at = q ? text.toLowerCase().indexOf(q) : -1;
+  if (at < 0) return <>{text}</>;
+  return <>{text.slice(0, at)}<mark>{text.slice(at, at + q.length)}</mark>{text.slice(at + q.length)}</>;
 }
 
 /*──────────────────────────────────────────────────────────────────────────*/
